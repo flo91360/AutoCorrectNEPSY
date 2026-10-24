@@ -72,6 +72,9 @@ def main(argv=None) -> int:
     p.add_argument("--afficher", action="store_true", help="affiche la version")
     p.add_argument("--notes", action="store_true", help="affiche la section du CHANGELOG")
     a = p.parse_args(argv)
+    # Sous Windows, la console de la CI est en cp1252 : les notes de la Release
+    # perdraient leurs accents.
+    sys.stdout.reconfigure(encoding="utf-8")
     version = version_pyproject((RACINE / "pyproject.toml").read_text(encoding="utf-8"))
     if a.afficher:
         print(version)

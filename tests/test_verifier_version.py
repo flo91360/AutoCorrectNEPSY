@@ -53,3 +53,13 @@ def test_notes_de_la_version(tmp_path):
 def test_depot_coherent():
     """Le dépôt lui-même passe le contrôle de la CI."""
     assert vv.erreurs(SCRIPT.parent.parent) == []
+
+
+def test_notes_en_utf8(capfd, monkeypatch):
+    """Les notes de la Release gardent leurs accents, quel que soit l'encodage de la console."""
+    monkeypatch.setattr(vv.sys, "stdout", open(1, "w", encoding="cp1252", closefd=False))
+    vv.main(["--notes"])
+    vv.sys.stdout.flush()
+    sortie = capfd.readouterr().out
+    attendu = vv.section((vv.RACINE / "CHANGELOG.md").read_text(encoding="utf-8"), vv.version_pyproject((vv.RACINE / "pyproject.toml").read_text(encoding="utf-8")))
+    assert sortie.strip() == attendu
