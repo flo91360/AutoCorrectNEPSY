@@ -1,0 +1,53 @@
+name: Version et changelog
+
+# À chaque PR fusionnée dans main : incrémente la version, ajoute la PR au
+# CHANGELOG et crée l'étiquette vX.Y.Z.
+# Niveau : étiquette « version: majeure » ou « version: mineure » sur la PR,
+# sinon correctif (0.2.0 -> 0.2.1).
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+# Deux fusions rapprochées ne doivent pas produire le même numéro.
+concurrency:
+  group: version
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Incrémenter la version et compléter le CHANGELOG
+        id: version
+        env:
+          TITRE: ${{ github.event.pull_request.title }}
+          NUMERO: ${{ github.event.pull_request.number }}
+          URL: ${{ github.event.pull_request.html_url }}
+          ETIQUETTES: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          version=$(python packaging/nouvelle_version.py \
+            --etiquettes "$ETIQUETTES" --titre "$TITRE" --numero "$NUMERO" --url "$URL")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          git diff
+      - name: Enregistrer et étiqueter
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          NUMERO: ${{ github.event.pull_request.number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Version $VERSION (#$NUMERO)"
+          git tag -a "v$VERSION" -m "Version $VERSION"
+          git push origin HEAD:main "v$VERSION"
