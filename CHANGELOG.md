@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.2.4] - 2026-10-24
+
+- Garder les accents des notes de version publiées avec l'exécutable
+
 ## [0.2.3] - 2026-10-24
 
 - Livrer comme les autres projets PlaniFiKateur : version augmentée dans chaque PR et vérifiée par la CI, exécutable publié automatiquement à chaque nouvelle version
