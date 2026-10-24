@@ -6,6 +6,10 @@ ajoutée automatiquement à chaque pull request fusionnée dans `main` (voir
 
 <!-- nouvelles versions -->
 
+## [0.2.2] - 2026-10-24
+
+- Ajouter les consignes pour Claude (fusion automatique quand la CI est verte) ([#5](https://github.com/flo91360/AutoCorrectNEPSY/pull/5))
+
 ## [0.2.1] - 2026-10-24
 
 - Mettre à jour le CHANGELOG et la version à chaque PR fusionnée ([#4](https://github.com/flo91360/AutoCorrectNEPSY/pull/4))
