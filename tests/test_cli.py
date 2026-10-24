@@ -44,6 +44,11 @@ def test_correct_command_writes_scores_and_report(scanned_pdf, tmp_path, capsys)
     assert "Accord global : 28/28" in capsys.readouterr().out
 
 
+def test_page_number_is_guessed_when_omitted(scanned_pdf, tmp_path, capsys):
+    assert main(["corriger", str(scanned_pdf), "-o", str(tmp_path)]) == 0
+    assert "Page 2 (items 4 à 7)" in capsys.readouterr().out
+
+
 def test_bad_page_number_is_a_clean_error(scanned_pdf, tmp_path, capsys):
     assert main(["corriger", str(scanned_pdf), "--pages", "1", "-o", str(tmp_path)]) == 1
     assert "Erreur" in capsys.readouterr().err

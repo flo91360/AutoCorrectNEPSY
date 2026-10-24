@@ -19,7 +19,6 @@ from functools import cached_property
 
 import cv2
 import numpy as np
-from skimage.morphology import skeletonize
 
 from . import geometry as geo
 
@@ -182,6 +181,33 @@ def extract_drawing(ink: np.ndarray, px_per_mm: float) -> Drawing:
         ys, xs = np.nonzero(labels == label)
         sizes.append(geo.max_diameter(np.column_stack([xs, ys]).astype(float)) / px_per_mm)
     return Drawing(strokes, stroke_width, sorted(sizes, reverse=True))
+
+
+def skeletonize(mask: np.ndarray) -> np.ndarray:
+    """Amincit le tracé jusqu'à une ligne d'un pixel (algorithme de Guo et Hall)."""
+    img = np.pad(mask.astype(bool), 1)
+    core = img[1:-1, 1:-1]
+    while True:
+        changed = False
+        for step in (0, 1):
+            p2, p3, p4 = img[:-2, 1:-1], img[:-2, 2:], img[1:-1, 2:]
+            p5, p6, p7 = img[2:, 2:], img[2:, 1:-1], img[2:, :-2]
+            p8, p9 = img[1:-1, :-2], img[:-2, :-2]
+            crossings = ((~p2 & (p3 | p4)).astype(np.int8) + (~p4 & (p5 | p6))
+                         + (~p6 & (p7 | p8)) + (~p8 & (p9 | p2)))
+            n1 = (p9 | p2).astype(np.int8) + (p3 | p4) + (p5 | p6) + (p7 | p8)
+            n2 = (p2 | p3).astype(np.int8) + (p4 | p5) + (p6 | p7) + (p8 | p9)
+            n = np.minimum(n1, n2)
+            if step == 0:
+                side = (p6 | p7 | ~p9) & p8
+            else:
+                side = (p2 | p3 | ~p5) & p4
+            remove = core & (crossings == 1) & (n >= 2) & (n <= 3) & ~side
+            if remove.any():
+                core[remove] = False
+                changed = True
+        if not changed:
+            return core.copy()
 
 
 def _clean(ink: np.ndarray, px_per_mm: float) -> np.ndarray:

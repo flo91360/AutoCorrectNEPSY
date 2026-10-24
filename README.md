@@ -15,13 +15,37 @@ cotation que l'ergothérapeute valide.
 - Premier essai sur un protocole réel : 46 critères sur 50 identiques à la
   cotation de l'ergothérapeute (kappa de Cohen 0,71).
 
-## Installation
+## Pour l'ergothérapeute : le logiciel Windows
+
+1. Téléchargez **[AutoCorrectNEPSY.exe](https://github.com/flo91360/AutoCorrectNEPSY/releases/latest/download/AutoCorrectNEPSY.exe)**
+   (dernière version, aussi disponible sur la page
+   [Releases](https://github.com/flo91360/AutoCorrectNEPSY/releases)).
+2. Double-cliquez dessus : aucune installation n'est nécessaire.
+   Au premier lancement, si Windows affiche « Windows a protégé votre
+   ordinateur », cliquez sur **Informations complémentaires**, puis
+   **Exécuter quand même**.
+3. Dans la fenêtre :
+   - **Ajouter des scans…** : choisissez les pages scannées du cahier ;
+   - vérifiez pour chaque scan la **page du cahier** proposée (devinée
+     automatiquement) et sa **résolution** en dpi (lue dans le fichier,
+     modifiable) ;
+   - cliquez sur **Lancer la correction automatique**.
+4. Les notes s'affichent, les items à vérifier sont surlignés. Le rapport
+   détaillé et le tableau des notes sont enregistrés dans un dossier
+   « Correction NEPSY » à côté des scans. Double-cliquez sur un item pour voir
+   son dessin annoté.
+
+Tout est calculé sur l'ordinateur : aucun scan n'est envoyé sur Internet.
+
+## Installation pour développer
 
 ```bash
-python -m pip install -e .
+python -m pip install -e ".[test]"
 ```
 
-## Utilisation
+Lancer la fenêtre : `python -m autocorrect_nepsy` (ou `autocorrect-nepsy-gui`).
+
+## Ligne de commande
 
 ### Scanner les pages
 
@@ -34,11 +58,19 @@ python -m pip install -e .
 ### Corriger
 
 ```bash
-autocorrect-nepsy corriger page1.pdf page2.pdf page3.pdf --pages 1,2,3 -o correction/
+autocorrect-nepsy corriger page1.pdf page2.pdf page3.pdf -o correction/
 ```
 
-`--pages` indique le numéro de page du cahier de chaque page scannée, dans
-l'ordre :
+Options :
+
+- `--pages 1,2,3` : numéro de page du cahier de chaque page scannée, dans
+  l'ordre. Sans cette option, il est déduit des scans (la page 1 a un
+  en-tête, les pages 2 à 4 ont quatre items, les pages 5 et 6 trois), en
+  supposant les scans dans l'ordre du cahier ; une page manquante est tolérée.
+- `--dpi 300` : impose la résolution si celle du fichier est fausse.
+- `--encre rouge` : couleur du stylo de l'enfant (bleu par défaut).
+
+Pages du cahier :
 
 | Page du cahier | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|
@@ -76,6 +108,8 @@ des désaccords. Les deux fichiers ont les colonnes
    manuel (reformulés) aux mesures.
 6. **Rapport** (`report.py`, `compare.py`) : CSV, HTML et comparaison avec la
    cotation de référence.
+7. **Interface** (`gui.py`) : fenêtre Tkinter ; `packaging/` contient de quoi
+   construire l'exécutable Windows.
 
 ## Données et confidentialité
 
@@ -107,3 +141,17 @@ partir du manuel et ne le remplacent pas.
 python -m pip install -e ".[test]"
 pytest
 ```
+
+Les tests de l'interface ont besoin d'un écran (sous Linux sans écran :
+`xvfb-run -a pytest`).
+
+### Construire l'exécutable
+
+```bash
+python -m pip install -e ".[exe]"
+python packaging/build.py      # produit dist/AutoCorrectNEPSY(.exe)
+```
+
+L'intégration continue construit et teste `AutoCorrectNEPSY.exe` sous Windows
+à chaque modification. Pour publier une version téléchargeable, il suffit de
+pousser une étiquette : `git tag v0.2.0 && git push origin v0.2.0`.

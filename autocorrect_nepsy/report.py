@@ -131,6 +131,27 @@ d'après la résolution du scan.</p>
 """, encoding="utf-8")
 
 
+def save_results(correction: Correction, folder: Path) -> tuple[Path, Path]:
+    """Écrit cotation.csv et rapport.html dans ``folder`` (créé au besoin)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    csv_path, html_path = folder / "cotation.csv", folder / "rapport.html"
+    write_csv(correction, csv_path)
+    write_html(correction, html_path)
+    return csv_path, html_path
+
+
+def totals(correction: Correction) -> dict[str, int]:
+    """Sommes des notes des items corrigés, par processus."""
+    sums = {"general": 0, "motricite": 0, "global": 0, "local": 0}
+    for report in correction.items:
+        result = report.result
+        sums["general"] += result.score("G") or 0
+        sums["motricite"] += result.motricite or 0
+        sums["global"] += result.global_ or 0
+        sums["local"] += result.local or 0
+    return sums
+
+
 def summary_text(correction: Correction) -> str:
     lines = ["item  G  A  B  Mot  C  D  Glob  E  F  Loc"]
     for report in correction.items:

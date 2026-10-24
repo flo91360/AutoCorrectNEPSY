@@ -4,23 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autocorrect-nepsy"
-version = "0.1.0"
+version = "0.2.0"
 description = "Correction automatique du subtest Copie de figures de la NEPSY-II (prototype)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
     "opencv-python-headless>=4.8",
-    "scikit-image>=0.21",
     "pypdf>=4.0",
     "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
+exe = ["pyinstaller>=6.0"]
 
 [project.scripts]
 autocorrect-nepsy = "autocorrect_nepsy.cli:main"
+
+[project.gui-scripts]
+autocorrect-nepsy-gui = "autocorrect_nepsy.gui:main"
 
 [tool.setuptools.packages.find]
 include = ["autocorrect_nepsy*"]

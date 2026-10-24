@@ -9,8 +9,8 @@ from pathlib import Path
 from .compare import format_comparison, pair_scores, read_scores
 from .ink import INK_HUES
 from .layout import LayoutError
-from .pipeline import correct
-from .report import summary_text, write_csv, write_html
+from .pipeline import correct, page_label
+from .report import save_results, summary_text
 
 
 def _pages(text: str) -> list[int]:
@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("fichiers", nargs="+", type=Path, help="scans (PDF ou images)")
     run.add_argument("--pages", type=_pages,
                      help="numéro de page du cahier (1 à 6) de chaque page scannée, dans l'ordre, "
-                          "ex. 1,2,3 (par défaut 1, 2, 3...)")
+                          "ex. 1,2,3 (par défaut, déduit des scans pris dans l'ordre du cahier)")
     run.add_argument("-o", "--sortie", type=Path, default=Path("correction"),
                      help="dossier de sortie (cotation.csv et rapport.html)")
     run.add_argument("--encre", default="bleu", choices=sorted(INK_HUES),
@@ -55,9 +55,10 @@ def main(argv: list[str] | None = None) -> int:
     except (LayoutError, ValueError) as error:
         print(f"Erreur : {error}", file=sys.stderr)
         return 1
-    args.sortie.mkdir(parents=True, exist_ok=True)
-    write_csv(correction, args.sortie / "cotation.csv")
-    write_html(correction, args.sortie / "rapport.html")
+    save_results(correction, args.sortie)
+    for source, number in correction.pages:
+        print(f"{source} : {page_label(number)}")
+    print()
     print(summary_text(correction))
     print(f"\nRésultats écrits dans {args.sortie}/ (cotation.csv, rapport.html)")
     return 0

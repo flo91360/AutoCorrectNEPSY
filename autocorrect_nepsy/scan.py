@@ -41,15 +41,17 @@ def load_pages(path: str | Path, dpi: float | None = None) -> list[ScannedPage]:
 
 def _load_pdf(path: Path, dpi: float | None) -> list[ScannedPage]:
     pages = []
-    for index, page in enumerate(PdfReader(path).pages, start=1):
-        images = list(page.images)
-        if not images:
-            raise ValueError(f"{path} page {index} : aucune image scannée trouvée")
-        pil = max((im.image for im in images), key=lambda im: im.width * im.height)
-        page_width_in = float(page.mediabox.width) / 72
-        page_dpi = dpi or pil.width / page_width_in
-        bgr = cv2.cvtColor(np.asarray(pil.convert("RGB")), cv2.COLOR_RGB2BGR)
-        pages.append(ScannedPage(bgr, page_dpi, f"{path.name} p{index}"))
+    # Fichier fermé dès la lecture finie : le scan reste déplaçable sous Windows.
+    with open(path, "rb") as stream:
+        for index, page in enumerate(PdfReader(stream).pages, start=1):
+            images = list(page.images)
+            if not images:
+                raise ValueError(f"{path.name} page {index} : aucune image scannée trouvée")
+            pil = max((im.image for im in images), key=lambda im: im.width * im.height)
+            page_width_in = float(page.mediabox.width) / 72
+            page_dpi = dpi or pil.width / page_width_in
+            bgr = cv2.cvtColor(np.asarray(pil.convert("RGB")), cv2.COLOR_RGB2BGR)
+            pages.append(ScannedPage(bgr, page_dpi, f"{path.name} p{index}"))
     return pages
 
 

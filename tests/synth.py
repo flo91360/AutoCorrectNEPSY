@@ -83,25 +83,30 @@ def draw_model(item: int, image: np.ndarray, color=BLUE_PEN, wobble: float = 0.0
 # -- page complète du cahier ----------------------------------------------------
 PAGE_W_MM, PAGE_H_MM = 297, 210
 SEPARATOR_Y_MM = 105
-COLUMN_X_MM = (20, 84.25, 148.5, 212.75, 277)
 LINE_GRAY = (180, 180, 180)
+COLUMNS_MM = {
+    4: (20, 84.25, 148.5, 212.75, 277),
+    3: (20, 105.7, 191.3, 277),
+    "page1": (20, 84, 148, 212),  # l'en-tête occupe la droite de la page 1
+}
 
 
-def page(items_by_column: dict[int, int], ppm: float = 100 / 25.4) -> np.ndarray:
-    """Page 2 du cahier (quatre colonnes) dans le sens de passation : modèles
-    imprimés en haut, copies de l'enfant au stylo bleu en bas."""
+def page(items_by_column: dict[int, int], layout=4, ppm: float = 100 / 25.4) -> np.ndarray:
+    """Page du cahier dans le sens de passation : modèles imprimés en haut,
+    copies de l'enfant au stylo bleu en bas. ``layout`` vaut 4, 3 ou "page1"."""
+    bounds = COLUMNS_MM[layout]
     image = np.full((int(PAGE_H_MM * ppm), int(PAGE_W_MM * ppm), 3), 245, np.uint8)
 
     def px(x, y):
         return int(round(x * ppm)), int(round(y * ppm))
 
     thickness = max(1, int(round(0.3 * ppm)))
-    cv2.line(image, px(COLUMN_X_MM[0], SEPARATOR_Y_MM), px(COLUMN_X_MM[-1], SEPARATOR_Y_MM),
+    cv2.line(image, px(bounds[0], SEPARATOR_Y_MM), px(bounds[-1], SEPARATOR_Y_MM),
              LINE_GRAY, thickness)
-    for x in COLUMN_X_MM[1:-1]:
+    for x in bounds[1:-1]:
         cv2.line(image, px(x, 15), px(x, 195), LINE_GRAY, thickness)
     for column, item in items_by_column.items():
-        x0 = COLUMN_X_MM[column]
+        x0 = bounds[column]
         draw_model(item, image, PRINT_BLACK, ppm=ppm, offset=(x0, 15))
         draw_model(item, image, BLUE_PEN, ppm=ppm, offset=(x0, SEPARATOR_Y_MM))
     return image
