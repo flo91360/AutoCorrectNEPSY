@@ -1,10 +1,14 @@
 # Journal des modifications
 
-Toutes les évolutions notables d'AutoCorrectNEPSY. Une nouvelle version est
-ajoutée automatiquement à chaque pull request fusionnée dans `main` (voir
-« Versions » dans le README).
+Toutes les évolutions notables d'AutoCorrectNEPSY. Chaque pull request ajoute
+la section de sa nouvelle version (voir « Versions et publication » dans le
+README).
 
 <!-- nouvelles versions -->
+
+## [0.2.3] - 2026-10-24
+
+- Livrer comme les autres projets PlaniFiKateur : version augmentée dans chaque PR et vérifiée par la CI, exécutable publié automatiquement à chaque nouvelle version
 
 ## [0.2.2] - 2026-10-24
 
