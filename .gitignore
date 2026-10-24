@@ -1,0 +1,20 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+.venv/
+
+# Données réelles : scans et cotations d'enfants (données de santé de mineurs)
+# et pages du manuel ou du cahier (droits d'auteur). Ce dépôt est public : elles
+# restent sur l'ordinateur de l'ergothérapeute et ne sont jamais versionnées.
+donnees/
+data/
+correction/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.csv
