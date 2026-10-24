@@ -153,5 +153,11 @@ python packaging/build.py      # produit dist/AutoCorrectNEPSY(.exe)
 ```
 
 L'intégration continue construit et teste `AutoCorrectNEPSY.exe` sous Windows
-à chaque modification. Pour publier une version téléchargeable, il suffit de
-pousser une étiquette : `git tag v0.2.0 && git push origin v0.2.0`.
+à chaque modification ; l'exécutable est disponible dans l'onglet *Actions*
+(artefact « AutoCorrectNEPSY-windows »).
+
+Pour publier une version téléchargeable par tous : sur GitHub, *Releases* →
+*Draft a new release*, choisir une étiquette (par exemple `v0.2.0`, créée à la
+publication), puis *Publish release*. Quelques minutes plus tard,
+`AutoCorrectNEPSY.exe` est joint automatiquement à la version, avec des notes
+par défaut si aucune n'a été saisie.
