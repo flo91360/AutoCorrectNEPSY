@@ -3,8 +3,10 @@ name: Exécutable Windows
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
+  # Publier une version depuis l'interface de GitHub y joint l'exécutable.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -40,12 +42,15 @@ jobs:
         with:
           name: AutoCorrectNEPSY-windows
           path: dist/AutoCorrectNEPSY.exe
-      - name: Publier la version
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Joindre l'exécutable à la version publiée
+        if: github.event_name == 'release'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "$GITHUB_REF_NAME" dist/AutoCorrectNEPSY.exe
-          --title "AutoCorrect NEPSY $GITHUB_REF_NAME"
-          --notes-file packaging/notes-de-version.md
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$TAG" dist/AutoCorrectNEPSY.exe --clobber
+          # Notes de version par défaut si aucune n'a été saisie.
+          if [ -z "$(gh release view "$TAG" --json body --jq .body)" ]; then
+            gh release edit "$TAG" --notes-file packaging/notes-de-version.md
+          fi
