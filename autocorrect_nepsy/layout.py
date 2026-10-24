@@ -30,6 +30,8 @@ ITEMS_BY_PAGE = {
 
 # Marge (mm) retirée autour des zones pour ne pas toucher les traits imprimés.
 ZONE_MARGIN_MM = 1.5
+# Trait de séparation plus court que cette part de la largeur : page 1 (en-tête).
+HEADER_SEPARATOR_FRACTION = 0.78
 
 
 class LayoutError(ValueError):
@@ -77,15 +79,85 @@ class PageLayout:
         return self.ink[y0:y1, x0:x1]
 
 
-def analyse_page(page: ScannedPage, page_number: int, ink: str = "bleu") -> PageLayout:
-    """Redresse la page, l'oriente et découpe les zones de ses items."""
-    if page_number not in ITEMS_BY_PAGE:
-        raise LayoutError(f"numéro de page invalide : {page_number} (1 à 6)")
+@dataclass
+class PreparedPage:
+    """Page redressée et orientée, colonnes d'items repérées, numéro de page
+    du cahier encore inconnu."""
+
+    image: np.ndarray
+    ink: np.ndarray
+    px_per_mm: float
+    quarter_turns: int
+    skew_deg: float
+    separator: Line
+    columns: list[tuple[int, int]]
+    top: int
+    bottom: int
+
+    @property
+    def has_header(self) -> bool:
+        """En page 1, l'en-tête (nom, date) raccourcit le trait de séparation."""
+        return self.separator.length < HEADER_SEPARATOR_FRACTION * self.image.shape[1]
+
+    def compatible_pages(self) -> list[int]:
+        """Pages du cahier qui ont cette structure (nombre de colonnes, en-tête)."""
+        return [number for number, items in ITEMS_BY_PAGE.items()
+                if len(items) == len(self.columns) and (number == 1) == self.has_header]
+
+    def layout(self, page_number: int) -> PageLayout:
+        if page_number not in ITEMS_BY_PAGE:
+            raise LayoutError(f"numéro de page invalide : {page_number} (1 à 6)")
+        items = ITEMS_BY_PAGE[page_number]
+        if len(self.columns) != len(items):
+            raise LayoutError(
+                f"{len(self.columns)} zones trouvées alors que la page {page_number} "
+                f"du cahier contient {len(items)} items")
+        margin = int(round(ZONE_MARGIN_MM * self.px_per_mm))
+        zones = [ItemZone(item,
+                          (x0 + margin, self.top + margin, x1 - margin, self.separator.pos - margin),
+                          (x0 + margin, self.separator.pos + margin, x1 - margin, self.bottom - margin))
+                 for item, (x0, x1) in zip(items, self.columns)]
+        return PageLayout(self.image, self.ink, self.px_per_mm, self.quarter_turns,
+                          self.skew_deg, self.separator, zones)
+
+
+def prepare_page(page: ScannedPage, ink: str = "bleu") -> PreparedPage:
+    """Redresse la page, l'oriente et repère les colonnes d'items."""
     image, skew = deskew(page.image)
     image, turns, separator = _orient(image, ink)
-    ink_px = ink_mask(image, ink)
-    zones = _item_zones(image, separator, ITEMS_BY_PAGE[page_number], page.px_per_mm)
-    return PageLayout(image, ink_px, page.px_per_mm, turns, skew, separator, zones)
+    columns, top, bottom = _columns(image, separator)
+    if len(columns) not in (3, 4):
+        raise LayoutError(f"{len(columns)} zones d'items trouvées : ce n'est pas une page du "
+                          "cahier de Copie de figures, ou le scan est incomplet")
+    return PreparedPage(image, ink_mask(image, ink), page.px_per_mm, turns, skew,
+                        separator, columns, top, bottom)
+
+
+def analyse_page(page: ScannedPage, page_number: int, ink: str = "bleu") -> PageLayout:
+    """Redresse la page, l'oriente et découpe les zones de ses items."""
+    return prepare_page(page, ink).layout(page_number)
+
+
+def guess_page_numbers(pages: list[PreparedPage],
+                       fixed: dict[int, int] | None = None) -> list[int]:
+    """Numéros de page du cahier, en supposant les scans dans l'ordre du cahier.
+
+    Chaque scan reçoit la première page compatible avec sa structure après
+    celle du scan précédent, ce qui tolère une page manquante. ``fixed`` impose
+    le numéro de certains scans (index -> numéro), choisi à la main.
+    """
+    fixed = fixed or {}
+    numbers, previous = [], 0
+    for index, page in enumerate(pages):
+        if index in fixed:
+            number = fixed[index]
+        else:
+            options = page.compatible_pages() or list(ITEMS_BY_PAGE)
+            following = [n for n in options if n > previous]
+            number = following[0] if following else options[0]
+        numbers.append(number)
+        previous = number
+    return numbers
 
 
 def deskew(image: np.ndarray) -> tuple[np.ndarray, float]:
@@ -204,8 +276,8 @@ def _line_mask(mask: np.ndarray) -> np.ndarray:
     return cv2.dilate(lines, np.ones((7, 7), np.uint8))
 
 
-def _item_zones(image: np.ndarray, separator: Line, items: tuple[int, ...],
-                px_per_mm: float) -> list[ItemZone]:
+def _columns(image: np.ndarray, separator: Line) -> tuple[list[tuple[int, int]], int, int]:
+    """Colonnes d'items (bornes x) et étendue verticale des zones."""
     h, w = image.shape[:2]
     crossing = [line for line in long_lines(faint_mask(image), False, 0.25)
                 if line.start < separator.pos < line.end
@@ -217,17 +289,6 @@ def _item_zones(image: np.ndarray, separator: Line, items: tuple[int, ...],
             merged.append(x)
     columns = [(a, b) for a, b in zip(merged, merged[1:])
                if b - a >= 0.12 * separator.length]
-    if len(columns) != len(items):
-        raise LayoutError(
-            f"{len(columns)} zones trouvées alors que la page contient {len(items)} items")
     top = min((line.start for line in crossing), default=int(0.05 * h))
     bottom = max((line.end for line in crossing), default=int(0.95 * h))
-    margin = int(round(ZONE_MARGIN_MM * px_per_mm))
-    zones = []
-    for item, (x0, x1) in zip(items, columns):
-        zones.append(ItemZone(
-            item,
-            (x0 + margin, top + margin, x1 - margin, separator.pos - margin),
-            (x0 + margin, separator.pos + margin, x1 - margin, bottom - margin),
-        ))
-    return zones
+    return columns, top, bottom

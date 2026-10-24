@@ -2,7 +2,8 @@ import cv2
 import numpy as np
 import pytest
 
-from autocorrect_nepsy.layout import LayoutError, analyse_page, deskew
+from autocorrect_nepsy.layout import (LayoutError, analyse_page, deskew, guess_page_numbers,
+                                      prepare_page)
 from autocorrect_nepsy.scan import ScannedPage
 
 from synth import page
@@ -48,3 +49,19 @@ def test_wrong_page_number_is_reported(page_image):
 def test_blank_scan_is_reported():
     with pytest.raises(LayoutError):
         analyse_page(ScannedPage(np.full((800, 1100, 3), 240, np.uint8), DPI, "vide"), 2)
+
+
+def test_page_structure_and_numbering():
+    page1 = prepare_page(ScannedPage(page({0: 1, 1: 2, 2: 3}, layout="page1"), DPI, "p1"))
+    four = prepare_page(ScannedPage(page({0: 4, 1: 5, 2: 6, 3: 7}), DPI, "p2"))
+    three = prepare_page(ScannedPage(page({0: 1, 1: 2, 2: 3}, layout=3), DPI, "p5"))
+    assert page1.has_header and page1.compatible_pages() == [1]
+    assert four.compatible_pages() == [2, 3, 4]
+    assert three.compatible_pages() == [5, 6]
+    # Scans dans l'ordre du cahier, page 4 absente.
+    assert guess_page_numbers([page1, four, four, three]) == [1, 2, 3, 5]
+    assert guess_page_numbers([page1, four, four, four, three, three]) == [1, 2, 3, 4, 5, 6]
+    # Un choix manuel est respecté et oriente la suite.
+    assert guess_page_numbers([four, four, three], fixed={0: 3}) == [3, 4, 5]
+    zones = page1.layout(1).zones
+    assert [zone.item for zone in zones] == [1, 2, 3]
