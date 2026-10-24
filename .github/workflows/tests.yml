@@ -1,25 +1,78 @@
-name: Tests
+name: Tests et exécutable Windows
 
+# Même parcours que les autres projets livrés par PlaniFiKateur :
+# - chaque PR augmente la version (pyproject.toml et autocorrect_nepsy/__init__.py)
+#   et ajoute sa section à CHANGELOG.md ; le job « Version » le vérifie ;
+# - tests sous Linux (Python 3.10 et 3.12) et Windows, puis construction et
+#   test de AutoCorrectNEPSY.exe ; PlaniFiKateur exige tous ces jobs avant de
+#   fusionner une PR ;
+# - une nouvelle version arrivée sur main publie la Release v<version> avec
+#   l'exécutable. Une version déjà publiée n'est jamais remplacée :
+#   PlaniFiKateur archive chaque Release dans Google Drive.
+# Un commit de PR n'est construit qu'une fois (événement pull_request) ; les
+# push ne déclenchent la CI que sur main.
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
 
 jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Vérifier la version et le CHANGELOG
+        shell: bash
+        env:
+          EVENEMENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENEMENT" = pull_request ]; then
+            git fetch -q --depth 1 origin "$BASE"
+            git show FETCH_HEAD:pyproject.toml > "$RUNNER_TEMP/pyproject-base.toml"
+            python packaging/verifier_version.py --base "$RUNNER_TEMP/pyproject-base.toml"
+          else
+            python packaging/verifier_version.py
+          fi
+
   tests:
+    name: Tests Python ${{ matrix.python-version }} (${{ matrix.systeme }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            systeme: Linux
             python-version: "3.10"
           - os: ubuntu-latest
+            systeme: Linux
             python-version: "3.12"
           - os: windows-latest
+            systeme: Windows
             python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -34,3 +87,83 @@ jobs:
       - name: Tests (Windows)
         if: runner.os == 'Windows'
         run: python -m pytest -q
+
+  exe:
+    name: Exécutable Windows
+    # Jamais d'exécutable (ni de Release) sans version valide et tests verts.
+    needs: [version, tests]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Installer
+        run: python -m pip install -e ".[exe]"
+      - name: Construire AutoCorrectNEPSY.exe
+        run: python packaging/build.py
+      - name: Tester l'exécutable
+        shell: pwsh
+        run: |
+          python packaging/sample_scan.py exemple.pdf
+          $p = Start-Process -FilePath dist\AutoCorrectNEPSY.exe -ArgumentList 'corriger','exemple.pdf','-o','sortie' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "correction en ligne de commande : code $($p.ExitCode)" }
+          if (-not (Test-Path sortie\cotation.csv)) { throw "cotation.csv absent" }
+          Get-Content sortie\cotation.csv
+          $p = Start-Process -FilePath dist\AutoCorrectNEPSY.exe -ArgumentList '--test-interface','exemple.pdf' -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            Get-Content test-interface-erreur.txt -ErrorAction SilentlyContinue
+            throw "interface : code $($p.ExitCode)"
+          }
+          "Taille : {0:N0} Mo" -f ((Get-Item dist\AutoCorrectNEPSY.exe).Length / 1MB)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoCorrectNEPSY-windows
+          path: dist/AutoCorrectNEPSY.exe
+          if-no-files-found: error
+
+      - name: Lire la version
+        id: version
+        shell: bash
+        run: echo "version=$(python packaging/verifier_version.py --afficher)" >> "$GITHUB_OUTPUT"
+
+      - name: Vérifier si la version est déjà publiée
+        id: published
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v${{ steps.version.outputs.version }}" >/dev/null; then
+            echo "Version v${{ steps.version.outputs.version }} déjà publiée : rien à publier. Augmenter la version pour une nouvelle Release."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Préparer les notes de version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.published.outputs.exists == 'false'
+        shell: bash
+        run: |
+          {
+            cat packaging/notes-de-version.md
+            echo
+            echo "## Modifications"
+            echo
+            python packaging/verifier_version.py --notes
+          } > dist/release-body.md
+
+      - name: Publier la version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.published.outputs.exists == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" dist/AutoCorrectNEPSY.exe \
+            --target "${{ github.sha }}" \
+            --title "AutoCorrectNEPSY $VERSION" \
+            --notes-file dist/release-body.md

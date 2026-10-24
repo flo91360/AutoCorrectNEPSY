@@ -152,24 +152,28 @@ python -m pip install -e ".[exe]"
 python packaging/build.py      # produit dist/AutoCorrectNEPSY(.exe)
 ```
 
-L'intégration continue construit et teste `AutoCorrectNEPSY.exe` sous Windows
-à chaque modification ; l'exécutable est disponible dans l'onglet *Actions*
-(artefact « AutoCorrectNEPSY-windows »).
+L'intégration continue (workflow « Tests et exécutable Windows ») construit et
+teste `AutoCorrectNEPSY.exe` sous Windows après les tests ; l'exécutable de
+chaque exécution est dans l'onglet *Actions* (artefact
+« AutoCorrectNEPSY-windows »).
 
-Pour publier une version téléchargeable par tous : sur GitHub, *Releases* →
-*Draft a new release*, choisir une étiquette (par exemple `v0.2.0`, créée à la
-publication), puis *Publish release*. Quelques minutes plus tard,
-`AutoCorrectNEPSY.exe` est joint automatiquement à la version, avec des notes
-par défaut si aucune n'a été saisie.
+### Versions et publication
 
-### Versions
+Même parcours que les autres projets livrés par PlaniFiKateur : **chaque pull
+request livre une nouvelle version**.
 
-À chaque pull request fusionnée dans `main`, le workflow « Version et
-changelog » incrémente la version (`pyproject.toml` et
-`autocorrect_nepsy/__init__.py`), ajoute le titre de la PR au
-[CHANGELOG](CHANGELOG.md) et crée l'étiquette `vX.Y.Z`. Par défaut c'est un
-correctif (0.2.0 → 0.2.1) ; mettre l'étiquette GitHub « version: mineure »
-(0.2.0 → 0.3.0) ou « version: majeure » (0.2.0 → 1.0.0) sur la PR avant de la
-fusionner. Le titre de la PR devient la ligne du CHANGELOG : le soigner.
-Pour publier cette version, choisir l'étiquette déjà créée dans *Draft a new
-release*.
+- La PR augmente la version (`pyproject.toml` et
+  `autocorrect_nepsy/__init__.py`) et ajoute sa section
+  `## [x.y.z] - date` en tête du [CHANGELOG](CHANGELOG.md). Une carte
+  PlaniFiKateur le fait d'elle-même ; pour une PR ouverte directement :
+  `python packaging/nouvelle_version.py --niveau correctif --resume "…"`
+  (`mineure` pour une nouvelle fonctionnalité, `majeure` pour un changement
+  incompatible).
+- Le job « Version » de la CI refuse une PR dont la version n'est pas
+  supérieure à celle de `main`, ou dont `__version__` ou le CHANGELOG ne
+  suivent pas (`python packaging/verifier_version.py` pour le vérifier en
+  local).
+- Une fois la PR fusionnée, la CI de `main` publie la version `vx.y.z` dans
+  les *Releases*, avec `AutoCorrectNEPSY.exe` et la section du CHANGELOG. Une
+  version déjà publiée n'est jamais remplacée ; PlaniFiKateur archive chaque
+  version dans Google Drive.
