@@ -161,3 +161,15 @@ Pour publier une version téléchargeable par tous : sur GitHub, *Releases* →
 publication), puis *Publish release*. Quelques minutes plus tard,
 `AutoCorrectNEPSY.exe` est joint automatiquement à la version, avec des notes
 par défaut si aucune n'a été saisie.
+
+### Versions
+
+À chaque pull request fusionnée dans `main`, le workflow « Version et
+changelog » incrémente la version (`pyproject.toml` et
+`autocorrect_nepsy/__init__.py`), ajoute le titre de la PR au
+[CHANGELOG](CHANGELOG.md) et crée l'étiquette `vX.Y.Z`. Par défaut c'est un
+correctif (0.2.0 → 0.2.1) ; mettre l'étiquette GitHub « version: mineure »
+(0.2.0 → 0.3.0) ou « version: majeure » (0.2.0 → 1.0.0) sur la PR avant de la
+fusionner. Le titre de la PR devient la ligne du CHANGELOG : le soigner.
+Pour publier cette version, choisir l'étiquette déjà créée dans *Draft a new
+release*.
