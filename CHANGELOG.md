@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.2.5] - 2026-10-24
+
+- Rapport détaillé : le dessin de l'enfant et les traits lus par l'outil sont affichés côte à côte au lieu d'être superposés.
+
 ## [0.2.4] - 2026-10-24
 
 - Garder les accents des notes de version publiées avec l'exécutable
