@@ -7,8 +7,9 @@ from autocorrect_nepsy.criteria import score_item
 from autocorrect_nepsy.ink import ink_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
-from synth import (PX_PER_MM, canvas, circle_points, cross_points, cylinder, dot, dot_row,
-                   draw_model, nested_triangles, polyline, s_curve, stairs_points, v_shape)
+from synth import (PX_PER_MM, bucket, canvas, circle_points, cross_points, cylinder, dot, dot_row,
+                   draw_model, flower, nested_triangles, polyline, s_curve, stairs_points, v_shape,
+                   wheels)
 
 
 def score(item, image):
@@ -19,7 +20,7 @@ def scores(result):
     return {code: c.score for code, c in result.criteria.items()}
 
 
-@pytest.mark.parametrize("item", range(1, 19))
+@pytest.mark.parametrize("item", range(1, 22))
 @pytest.mark.parametrize("wobble", [0.0, 0.5])
 def test_faithful_copy_gets_full_marks(item, wobble):
     result = score(item, draw_model(item, canvas(), wobble=wobble))
@@ -30,7 +31,8 @@ def test_faithful_copy_gets_full_marks(item, wobble):
                                          (9, "GABCDEF"), (10, "GABCDEF"), (11, "GABCDEF"),
                                          (12, "GABCDEF"), (13, "GABCDEF"), (14, "GABCDEF"),
                                          (15, "GABCDEF"), (16, "GABCDEF"), (17, "GABCDEF"),
-                                         (18, "GABCDEF")])
+                                         (18, "GABCDEF"), (19, "GABCDEF"), (20, "GABCDEF"),
+                                         (21, "GABCDEF")])
 def test_empty_zone_scores_zero_and_asks_review(item, codes):
     result = score(item, canvas())
     assert scores(result) == {c: 0 for c in codes}
@@ -366,6 +368,80 @@ def test_item18_step_count_and_heights():
                                                                heights=[16, 12.3, 12.3, 12.3]),
                                        closed=True)))
     assert uneven["D"] == 0 and uneven["E"] == 1
+
+
+def bucket_image(top=(32, 30), **kwargs):
+    image = canvas()
+    for i, (points, closed) in enumerate(bucket(top, **kwargs)):
+        polyline(image, points, closed=closed, seed=i)
+    return image
+
+
+def test_item19_narrow_opening_fails_local_f():
+    result = scores(score(19, bucket_image(inner=0.65)))
+    assert result["F"] == 0 and result["G"] == 1 and result["D"] == 1
+
+
+def test_item19_circles_and_detached_base():
+    circles = scores(score(19, bucket_image(top=(32, 24), a=18, b=17, drop=30)))
+    assert circles["E"] == 0 and circles["F"] == 0
+    detached = scores(score(19, bucket_image(drop=40)))
+    assert detached["G"] == 0 and detached["C"] == 0
+
+
+def flower_image(**kwargs):
+    image = canvas()
+    for i, petal in enumerate(flower((32, 44), **kwargs)):
+        polyline(image, petal, closed=True, seed=i)
+    return image
+
+
+def test_item20_seven_petals_and_rounded_tips():
+    seven = scores(score(20, flower_image(petals=7)))
+    assert seven["C"] == 0 and seven["F"] == 0 and seven["G"] == 0
+    blunt = scores(score(20, flower_image(blunt=True)))
+    assert blunt["D"] == 0 and blunt["G"] == 0 and blunt["C"] == 1
+
+
+def test_item20_petal_away_from_center_and_petal_sizes():
+    away = scores(score(20, flower_image(starts=[4, 0, 0, 0, 0, 0])))
+    assert away["D"] == 0 and away["G"] == 1
+    long = scores(score(20, flower_image(length=36)))
+    assert long["F"] == 0 and long["E"] == 1
+    wide = scores(score(20, flower_image(width=12)))
+    assert wide["E"] == 0 and wide["F"] == 1
+
+
+def wheels_image(strokes=None, size=(64, 88), **kwargs):
+    image = canvas(*size)
+    for i, (points, closed) in enumerate(strokes or wheels(**kwargs)):
+        polyline(image, points, closed=closed, seed=i)
+    return image
+
+
+def test_item21_five_chords_and_no_axle():
+    five = scores(score(21, wheels_image(chords=(5, 5))))
+    assert five["G"] == 0 and five["F"] == 0 and five["D"] == 1
+    loose = scores(score(21, wheels_image(axle=False)))
+    assert loose["C"] == 0 and loose["G"] == 0 and loose["D"] == 1
+
+
+def test_item21_wheel_sizes():
+    equal = scores(score(21, wheels_image(size=(80, 90), left_center=(30, 55), left=23.0,
+                                          right=23.0, offset=(16, -18))))
+    assert equal["D"] == 0 and equal["G"] == 0 and equal["E"] == 1
+    large = scores(score(21, wheels_image(size=(90, 100), left_center=(34, 62), left=31.0,
+                                          right=25.0, offset=(18, -22))))
+    assert large["E"] == 0 and large["D"] == 1
+
+
+def test_item21_broken_spoke_fails_motricite_b():
+    strokes = wheels()
+    center, u = np.array([26.0, 52.0]), np.array([25.0, 0.0])
+    strokes[2] = ([center - u, center - 0.5 * u], False)  # corde horizontale de la grande roue
+    strokes.append(([center - 0.42 * u, center + u], False))
+    broken = scores(score(21, wheels_image(strokes)))
+    assert broken["B"] == 0 and broken["A"] == 1
 
 
 def test_borderline_measure_is_flagged():

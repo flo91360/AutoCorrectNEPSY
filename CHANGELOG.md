@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.7.0] - 2026-10-25
+
+- Correction des items 19 à 21 (seau, fleur, roues) : tout le subtest Copie de figures est pris en charge
+
 ## [0.6.0] - 2026-10-25
 
 - Correction des items 16 à 18 (triangles imbriqués, figure en V, escalier) à partir des régions fermées du dessin

@@ -7,7 +7,7 @@ from typing import Callable
 from ..strokes import Drawing
 from . import (item_01_02, item_03, item_04, item_05, item_06, item_07, item_08, item_09,
                item_10, item_11, item_12, item_13, item_14, item_15, item_16,
-               item_17, item_18)
+               item_17, item_18, item_19, item_20, item_21)
 from .base import CODES, PROCESS_NAMES, Criterion, ItemResult
 
 SCORERS: dict[int, Callable[[Drawing, int], ItemResult]] = {
@@ -29,6 +29,9 @@ SCORERS: dict[int, Callable[[Drawing, int], ItemResult]] = {
     16: item_16.score,
     17: item_17.score,
     18: item_18.score,
+    19: item_19.score,
+    20: item_20.score,
+    21: item_21.score,
 }
 
 SUPPORTED_ITEMS = tuple(sorted(SCORERS))
