@@ -57,6 +57,46 @@ def dot_row(start, step, count: int = 10):
     return [np.asarray(start, float) + i * np.asarray(step, float) for i in range(count)]
 
 
+def s_curve(center, vertical: bool = False, half: float = 18.0, bulge: float = 7.0):
+    """Ligne en « S » du modèle de l'item 12 : creux puis crête, extrémités
+    qui recoupent un peu l'axe. Verticale : même ligne tournée d'un quart de tour."""
+    t = np.linspace(-half, half, 200)
+    across = -bulge * np.sin(np.pi * t / 16)
+    x, y = (-across, t) if vertical else (t, across)
+    return np.column_stack([center[0] + x, center[1] + y])
+
+
+def cylinder(center, half_length: float = 17.4, radius: float = 9.3, depth: float = 6.2,
+             back_depth: float | None = None):
+    """Cylindre couché de l'item 14, incliné à 45° vers le bas à droite :
+    ellipse à l'avant (en bas à droite), arrière incurvé vers l'extérieur.
+    Renvoie (points, fermé, graine) pour chaque trait."""
+    c = np.asarray(center, float)
+    u = np.array([1.0, 1.0]) / np.sqrt(2)  # axe, vers l'avant
+    n = np.array([1.0, -1.0]) / np.sqrt(2)  # en travers
+    back, front = c - half_length * u, c + half_length * u
+    back_depth = depth if back_depth is None else back_depth
+    theta = np.linspace(0, 2 * np.pi, 240)
+    ellipse = front + np.outer(radius * np.cos(theta), n) + np.outer(depth * np.sin(theta), u)
+    half = np.linspace(0, np.pi, 120)
+    arc = back + np.outer(radius * np.cos(half), n) - np.outer(back_depth * np.sin(half), u)
+    return [(ellipse, True, 0), (arc, False, 1),
+            ([back + radius * n, front + radius * n], False, 2),
+            ([back - radius * n, front - radius * n], False, 3)]
+
+
+def cross_points(center, half_width: float = 6.0, arm: float = 11.0, arms=None):
+    """Contour de la croix de l'item 15 (12 sommets, en partant du haut à
+    gauche). ``arms`` : longueurs des branches haut, droite, bas, gauche."""
+    x, y = center
+    w = half_width
+    top, right, bottom, left = arms or (arm,) * 4
+    return [(x - w, y - w - top), (x + w, y - w - top), (x + w, y - w), (x + w + right, y - w),
+            (x + w + right, y + w), (x + w, y + w), (x + w, y + w + bottom),
+            (x - w, y + w + bottom), (x - w, y + w), (x - w - left, y + w),
+            (x - w - left, y - w), (x - w, y - w)]
+
+
 def circle_points(center, radius: float, start_deg: float = 0, sweep_deg: float = 360,
                   ry: float | None = None) -> np.ndarray:
     angles = np.radians(np.linspace(start_deg, start_deg + sweep_deg, 240))
@@ -68,7 +108,8 @@ def draw_model(item: int, image: np.ndarray, color=BLUE_PEN, wobble: float = 0.0
                ppm: float = PX_PER_MM, offset=(0.0, 0.0)) -> np.ndarray:
     """Copie fidèle du modèle de l'item, centrée dans une zone de 64 x 88 mm."""
     def draw(points, **kwargs):
-        polyline(image, points, color, wobble=wobble, ppm=ppm, offset=offset, **kwargs)
+        kwargs.setdefault("wobble", wobble)
+        polyline(image, points, color, ppm=ppm, offset=offset, **kwargs)
 
     if item == 1:
         draw([(32, 24), (32, 64)])
@@ -101,6 +142,22 @@ def draw_model(item: int, image: np.ndarray, color=BLUE_PEN, wobble: float = 0.0
     elif item == 11:
         draw([(4, 24), (60, 24), (60, 64), (4, 64)], closed=True)
         draw([(4, 43), (24, 43), (24, 24)], seed=1)
+    elif item == 12:
+        draw(s_curve((32, 44)))
+        draw(s_curve((32, 44), vertical=True), seed=1)
+    elif item == 13:
+        # Barre grisée de 2 mm : le tremblement d'une copie fidèle reste plus faible.
+        draw([(7, 58), (57, 58)], wobble=wobble * 0.6)
+        for i, angle in enumerate(np.radians(np.arange(22.5, 180, 22.5)), start=1):
+            draw([(32, 58), (32 + 25 * np.cos(angle), 58 - 25 * np.sin(angle))], seed=i,
+                 wobble=wobble * 0.6)
+    elif item == 14:
+        for points, closed, seed in cylinder((32, 44)):
+            # Barre grisée de 2 mm : le tremblement d'une copie fidèle reste plus faible.
+            draw(points, closed=closed, seed=seed, wobble=wobble * 0.6)
+    elif item == 15:
+        # Côtés de 11 et 12 mm comparés à 1,2:1 près : tremblement plus faible.
+        draw(cross_points((32, 44)), closed=True, wobble=wobble * 0.6)
     else:
         raise ValueError(item)
     return image

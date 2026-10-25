@@ -33,6 +33,7 @@ MERGE_OFFSET_MM = 2.0  # décalage latéral max pour raccorder deux morceaux
 MERGE_GAP_MM = 10.0  # interruption max entre deux morceaux d'une même ligne
 INTERRUPTION_MM = 0.5  # vide minimal le long d'une ligne pour une interruption
 DOUBLED_SEPARATION_MM = 0.8  # écart à partir duquel deux passages se distinguent
+CONVERGENCE_EDGES = 5  # nœud où convergent au moins autant de traits (éventail)
 
 _OFFSETS = [(-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1)]
 
@@ -435,16 +436,21 @@ class _SkeletonGraph:
         if len(ends) < 2:
             return []
         center = self.node_centers[node]
+        # Là où beaucoup de traits convergent, seuls se prolongent ceux qui
+        # continuent presque tout droit ; ailleurs, une courbe peut tourner.
+        convergence = len(ends) >= CONVERGENCE_EDGES
+        direction_of = _own_direction if convergence else _direction_from
+        max_deviation = CORNER_ANGLE if convergence else 60.0
         directions = []
         for index, end in ends:
             points = self.edges[index][0]
             points = points if end == 0 else points[::-1]
-            directions.append(_direction_from(points, center))
+            directions.append(direction_of(points, center))
         candidates = []
         for i in range(len(ends)):
             for j in range(i + 1, len(ends)):
                 deviation = 180.0 - geo.angle_between(directions[i], directions[j])
-                if deviation <= 60.0:
+                if deviation <= max_deviation:
                     candidates.append((deviation, i, j))
         used, pairs = set(), []
         for _, i, j in sorted(candidates):
@@ -461,6 +467,21 @@ def _direction_from(points: np.ndarray, center: np.ndarray) -> np.ndarray:
     beyond = np.flatnonzero(distances >= reach)
     target = points[beyond[0]] if len(beyond) else points[-1]
     return geo.unit(target - center)
+
+
+def _own_direction(points: np.ndarray, center: np.ndarray) -> np.ndarray:
+    """Direction du tracé de l'arête elle-même, entre ~3 et ~8 mm du nœud :
+    là où beaucoup de traits convergent, le centre du nœud est décalé dans la
+    tache d'encre et les premiers millimètres sont déformés."""
+    distances = np.linalg.norm(points - center, axis=1)
+    farthest = float(distances.max())
+
+    def at(reach: float) -> np.ndarray:
+        beyond = np.flatnonzero(distances >= reach)
+        return points[beyond[0]] if len(beyond) else points[-1]
+
+    a, b = at(min(3.0, 0.3 * farthest)), at(min(8.0, 0.8 * farthest))
+    return geo.unit(b - a) if np.linalg.norm(b - a) > 1e-6 else _direction_from(points, center)
 
 
 def _join(chain: list[np.ndarray]) -> np.ndarray:

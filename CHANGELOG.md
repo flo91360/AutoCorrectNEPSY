@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.5.0] - 2026-10-25
+
+- Correction des items 12 à 15 (deux lignes en S, éventail, cylindre, croix) ; le rapport montre les lignes reconstituées par l'outil
+
 ## [0.4.0] - 2026-10-25
 
 - Correction des items 9 à 11 (rangée de cercles pleins, triangle sur trapèze, drapeau) ; les dessins qui dépassent le bout du trait de séparation ne sont plus coupés

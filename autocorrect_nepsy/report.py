@@ -69,12 +69,9 @@ def annotate(report: ItemReport) -> np.ndarray:
     """
     drawing = report.drawing
     marks = report.result.marks
-    # Les lignes droites ajustées n'ont de sens que pour les figures faites de
-    # traits droits (celles qui ont une barre grisée), pas pour les cercles.
-    lines = drawing.significant_lines() if any(m.kind == "bande" for m in marks) else []
     # Les taches (item 9) sont dessinées telles quelles, à la place de leurs traits.
     strokes = [] if any(m.kind == "tache" for m in marks) else drawing.strokes
-    return measured_image(report.zone_image.shape, report.px_per_mm, strokes, lines,
+    return measured_image(report.zone_image.shape, report.px_per_mm, strokes, [],
                           marks, drawing.stroke_width)
 
 
