@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.10.0] - 2026-10-25
+
+- Commande « valider » : correction d'un corpus local de protocoles comparée à la cotation de l'ergothérapeute, avec des chiffres d'ensemble seulement (accord et kappa par processus, critère et item, écarts des totaux, désaccords signalés, objectifs d'acceptation) et le suivi des changements d'une version à l'autre
+- « comparer » donne le kappa de chaque critère et la part des désaccords dans des items « à vérifier »
+
 ## [0.9.0] - 2026-10-25
 
 - Coins arrondis reconnus comme des coins (carré de 4 cm aux coins jusqu'à 6 mm de rayon environ, rectangle de l'item 11) sans découper les lignes ondulées ni les cercles

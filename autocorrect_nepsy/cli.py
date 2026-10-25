@@ -1,4 +1,4 @@
-"""Ligne de commande : ``autocorrect-nepsy corriger`` et ``autocorrect-nepsy comparer``."""
+"""Ligne de commande : ``autocorrect-nepsy corriger``, ``comparer`` et ``valider``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from .compare import format_comparison, pair_scores, read_scores
+from . import validation
+from .compare import format_comparison, pair_scores, read_flags, read_scores
 from .ink import INK_HUES
 from .layout import LayoutError
 from .pipeline import correct, page_label
@@ -44,14 +45,30 @@ def main(argv: list[str] | None = None) -> int:
     cmp.add_argument("automatique", type=Path, help="cotation.csv produit par « corriger »")
     cmp.add_argument("reference", type=Path, help="cotation de l'ergothérapeute (même format)")
 
+    val = commands.add_parser(
+        "valider", help="compare l'outil à l'ergothérapeute sur un corpus local de protocoles")
+    val.add_argument("corpus", type=Path,
+                     help="dossier du corpus : un sous-dossier par protocole, avec ses scans et "
+                          "cotation_ergo.csv (et pages.txt si besoin)")
+    val.add_argument("--encre", default="bleu", choices=sorted(INK_HUES),
+                     help="couleur du stylo des enfants")
+    val.add_argument("--json", type=Path,
+                     help="enregistre les résultats (à garder hors du dépôt : ils contiennent la "
+                          "cotation automatique de chaque protocole)")
+    val.add_argument("--precedent", type=Path,
+                     help="résultats JSON d'un passage précédent, pour voir ce qui a changé")
+
     args = parser.parse_args(argv)
+    if args.command == "valider":
+        return _validate(args)
     if args.command == "comparer":
         try:
-            pairs = pair_scores(read_scores(args.automatique), read_scores(args.reference))
+            flags = read_flags(args.automatique)
+            pairs = pair_scores(read_scores(args.automatique), read_scores(args.reference), flags)
         except ValueError as error:
             print(f"Erreur : {error}", file=sys.stderr)
             return 1
-        print(format_comparison(pairs))
+        print(format_comparison(pairs, flags_known=flags is not None))
         return 0
 
     try:
@@ -65,6 +82,32 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print(summary_text(correction))
     print(f"\nRésultats écrits dans {args.sortie}/ (cotation.csv, rapport.html)")
+    return 0
+
+
+def _validate(args: argparse.Namespace) -> int:
+    try:
+        previous = validation.load(args.precedent) if args.precedent else None
+        protocols, errors = validation.run(args.corpus, args.encre, progress=print)
+    except ValueError as error:
+        print(f"Erreur : {error}", file=sys.stderr)
+        return 1
+    if not protocols:
+        print("Erreur : aucun protocole corrigé (un dossier par protocole, avec "
+              f"{validation.REFERENCE_NAME})", file=sys.stderr)
+        return 1
+    summary = validation.summarize(protocols)
+    print()
+    print(validation.format_summary(summary))
+    if previous:
+        print()
+        print(validation.compare_versions(summary, previous, protocols))
+    if errors:
+        print(f"\n{len(errors)} protocole(s) non corrigé(s) :")
+        print("\n".join(f"  {error}" for error in errors))
+    if args.json:
+        validation.save(summary, args.json)
+        print(f"\nRésultats enregistrés dans {args.json}")
     return 0
 
 

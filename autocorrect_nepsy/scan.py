@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
 MM_PAR_POUCE = 25.4
+SCAN_SUFFIXES = (".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
 
 
 @dataclass
@@ -79,3 +81,8 @@ def _load_images(path: Path, dpi: float | None) -> list[ScannedPage]:
             source = path.name if count == 1 else f"{path.name} p{index}"
             pages.append(ScannedPage(bgr, page_dpi, source))
     return pages
+
+
+def natural_key(path: Path) -> list:
+    """Clé de tri des noms de fichiers dans l'ordre naturel (« page 2 » avant « page 10 »)."""
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", path.name)]

@@ -97,12 +97,48 @@ Sorties dans le dossier choisi :
 autocorrect-nepsy comparer correction/cotation.csv cotation_ergo.csv
 ```
 
-Affiche l'accord global, le kappa de Cohen, l'accord par critère et la liste
-des désaccords. Les deux fichiers ont les colonnes
+Affiche l'accord global, le kappa de Cohen (global et par critère) et la liste
+des désaccords, en indiquant ceux qui tombent dans un item signalé « à
+vérifier ». Les deux fichiers ont les colonnes
 `item,general,motricite_A,motricite_B,motricite_total,global_C,global_D,global_total,local_E,local_F,local_total`
 (case vide pour un critère qui n'existe pas). Un tableau enregistré en CSV par
 Excel convient (séparateur point-virgule, encodage Windows) ; les lignes sans
 numéro d'item, comme une ligne de total, sont ignorées.
+
+### Valider sur un corpus de protocoles
+
+```bash
+autocorrect-nepsy valider donnees/validation --json donnees/validation-0.10.0.json
+autocorrect-nepsy valider donnees/validation --precedent donnees/validation-0.10.0.json
+```
+
+Corrige chaque protocole d'un corpus et le compare à la cotation de
+l'ergothérapeute. Le corpus reste sur l'ordinateur (dossier `donnees/`, ignoré
+par git) : un sous-dossier par protocole, nommé par un pseudonyme (`P001`…),
+avec ses scans, `cotation_ergo.csv` (cotation faite sans voir celle de
+l'outil) et, si le numéro de page ne peut pas être deviné, `pages.txt`
+(ex. `1,2,3,4,5,6`).
+
+Seuls des chiffres d'ensemble sont affichés :
+
+- accord et kappa par processus et par critère ;
+- accord par item ;
+- écart des totaux ;
+- part des items « à vérifier » et part des désaccords qu'ils couvrent.
+
+Ces chiffres sont confrontés à des objectifs (kappa d'au moins 0,80 par
+processus, aucun item sous 85 % d'accord, 95 % des désaccords dans des items
+signalés, totaux à 1 point près dans 90 % des protocoles), à fixer avec
+l'ergothérapeute.
+
+`--json` enregistre les résultats, avec la cotation automatique de chaque
+protocole. Il faut garder ce fichier hors du dépôt. `--precedent` indique ce
+qui a changé depuis un passage précédent sur le même corpus.
+
+Pour ne pas régler l'outil sur ses propres données de validation :
+
+- garder un dossier de réglage et un dossier de validation séparés ;
+- ne lancer la validation qu'une fois la version figée.
 
 ## Fonctionnement
 
