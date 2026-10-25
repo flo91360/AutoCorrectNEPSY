@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.3.1] - 2026-10-25
+
+- Corriger le double-clic sur un item et le bouton « Ouvrir le rapport détaillé », qui n'ouvraient rien sous Windows
+
 ## [0.3.0] - 2026-10-25
 
 - Rapport : les mesures de l'outil (longueurs, angles, barre grisée, diamètres, chevauchements) sont dessinées sur les traits de chaque item, pour pouvoir les vérifier sans les annotations de l'ergothérapeute
