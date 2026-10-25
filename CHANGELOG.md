@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.7.1] - 2026-10-25
+
+- Cotation indépendante de la résolution du scan : recherche d'ellipses systématique (seau, roues) et scans plus fins que 200 dpi ramenés à 200 dpi
+
 ## [0.7.0] - 2026-10-25
 
 - Correction des items 19 à 21 (seau, fleur, roues) : tout le subtest Copie de figures est pris en charge

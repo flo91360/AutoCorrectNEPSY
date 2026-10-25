@@ -8,7 +8,7 @@ Le démarrage prend quelques secondes.
 
 ## Utilisation
 
-1. **Ajouter des scans…** : choisissez les pages scannées du cahier (PDF ou images, 200 dpi au moins, en taille réelle). Le sens du scan n'a pas d'importance.
+1. **Ajouter des scans…** : choisissez les pages scannées du cahier (PDF ou images, en couleur, 200 ou 300 dpi, en taille réelle ; un scan plus fin est ramené à 200 dpi). Le sens du scan n'a pas d'importance.
 2. Vérifiez pour chaque scan la **page du cahier** proposée et sa **résolution**.
 3. Cliquez sur **Lancer la correction automatique**.
 

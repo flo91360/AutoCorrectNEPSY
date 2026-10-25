@@ -437,7 +437,7 @@ def test_item21_wheel_sizes():
 
 def test_item21_broken_spoke_fails_motricite_b():
     strokes = wheels()
-    center, u = np.array([26.0, 52.0]), np.array([25.0, 0.0])
+    center, u = np.array([27.0, 52.0]), np.array([25.0, 0.0])
     strokes[2] = ([center - u, center - 0.5 * u], False)  # corde horizontale de la grande roue
     strokes.append(([center - 0.42 * u, center + u], False))
     broken = scores(score(21, wheels_image(strokes)))

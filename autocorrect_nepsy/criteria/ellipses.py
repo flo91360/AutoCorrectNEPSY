@@ -2,9 +2,12 @@
 
 Quand plusieurs ellipses se croisent ou que d'autres lignes les rejoignent,
 les traits reconstruits passent de l'une à l'autre. On ajuste donc des
-ellipses sur des portions de traits prises au hasard (tirage reproductible),
-on garde celle que le dessin suit sur la plus grande part de son contour,
-on retire ses points et on recommence.
+ellipses sur des portions de traits prises tout le long de chaque trait, à
+intervalles réguliers en mm (le résultat ne dépend ni du hasard ni de la
+résolution du scan). On garde celle que le dessin suit sur la plus grande part
+de son contour, on retire ses points et on recommence. Seuls comptent les
+points dont le tracé longe l'ellipse : un rayon qui la traverse n'en trace
+pas une portion.
 """
 
 from __future__ import annotations
@@ -18,14 +21,17 @@ from .. import geometry as geo
 from ..strokes import STEP_MM, Drawing
 
 TOLERANCE_MM = 1.2  # un point est sur l'ellipse à moins de cette distance (main levée)
-TRIALS = 400  # portions de traits essayées pour chaque ellipse
-WINDOW_MM = (12.0, 60.0)  # longueur des portions de traits essayées
+ALIGNED_DEG = 30.0  # le tracé longe l'ellipse : direction à moins de 30° de sa tangente
+WINDOW_LENGTHS_MM = (15.0, 25.0, 40.0, 60.0)  # longueur des portions de traits essayées
+WINDOW_STEP_MM = 3.0  # écart entre les débuts de deux portions essayées
+POLISHED = 5  # ellipses candidates affinées avant d'en retenir une
+POLISH_STEPS = ((1.0, 1.0, 4.0), (0.5, 0.5, 2.0), (0.25, 0.25, 1.0))  # centre, axes (mm), angle (°)
 MIN_COVERAGE = 0.5  # part du contour tracée pour retenir une ellipse
 MIN_AXIS_MM = 4.0
 MAX_ELONGATION = 4.0  # au-delà, ce n'est plus une ellipse mais un trait
 RUN_GAP_MM = 2.0  # trou qui sépare deux tronçons tracés d'une ellipse
 STRAIGHT_TOLERANCE_MM = 0.3  # écart à la corde d'une portion « droite »
-CURVED_SAGITTA_MM = 0.6  # flèche de l'ellipse sur la même corde : elle se courbe
+CURVED_SAGITTA_MM = 0.7  # flèche de l'ellipse sur la même corde : elle se courbe
 
 
 @dataclass
@@ -34,8 +40,8 @@ class Ellipse:
     major: float  # grand diamètre (mm)
     minor: float  # petit diamètre (mm)
     major_axis: np.ndarray  # direction du grand axe (vecteur unitaire)
-    points: np.ndarray  # points du dessin sur l'ellipse
-    coverage: float  # part du contour tracée
+    points: np.ndarray  # points du dessin sur l'ellipse (à moins de 1,2 mm)
+    coverage: float  # part du contour longée par le tracé
 
     @property
     def minor_axis(self) -> np.ndarray:
@@ -78,6 +84,19 @@ class Ellipse:
         q = self.local(points)
         return np.arctan2(q[:, 1], q[:, 0])
 
+    def tangent(self, points: np.ndarray) -> np.ndarray:
+        """Direction (unitaire) du contour de l'ellipse à hauteur de chaque point."""
+        t = self.angles(points)
+        d = (np.outer(-np.sin(t) * self.major / 2, self.major_axis)
+             + np.outer(np.cos(t) * self.minor / 2, self.minor_axis))
+        return d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+
+    def traced(self, points: np.ndarray, directions: np.ndarray) -> np.ndarray:
+        """Points tout près de l'ellipse dont le tracé la longe (direction ``directions``)."""
+        near = self.distance(points) <= TOLERANCE_MM
+        along = np.abs((self.tangent(points) * directions).sum(axis=1))
+        return near & (along >= np.cos(np.radians(ALIGNED_DEG)))
+
     def largest_gap(self) -> tuple[float, float]:
         """Plus grand arc non tracé : longueur (mm) et angle (réduit) de son milieu."""
         a = np.sort(self.angles(self.points))
@@ -96,7 +115,8 @@ class Ellipse:
         return self.radial(points) < 1
 
 
-def _fit(points: np.ndarray) -> Ellipse | None:
+def fit(points: np.ndarray) -> Ellipse | None:
+    """Ellipse ajustée sur des points, si elle n'est ni trop petite ni trop allongée."""
     if len(points) < 6:
         return None
     try:
@@ -112,55 +132,157 @@ def _fit(points: np.ndarray) -> Ellipse | None:
                    np.array([np.cos(theta), np.sin(theta)]), points, 0.0)
 
 
-def _coverage(ellipse: Ellipse, points: np.ndarray) -> float:
+def coverage(ellipse: Ellipse, points: np.ndarray) -> float:
+    """Part du contour (72 secteurs) où passent des points."""
     if not len(points):
         return 0.0
     bins = np.floor((ellipse.angles(points) + np.pi) / (2 * np.pi) * 72).astype(int) % 72
     return len(np.unique(bins)) / 72
 
 
-def find_ellipses(drawing: Drawing, count: int, max_size: float | None = None,
-                  seed: int = 0) -> list[Ellipse]:
+def tangents(drawing: Drawing) -> np.ndarray:
+    """Direction locale du tracé (vecteur unitaire, sur ~2 mm) en chaque point
+    de ``drawing.points``."""
+    found = []
+    for stroke in drawing.strokes:
+        pts = stroke.points
+        k = min(3, len(pts) - 1)
+        if k == 0:
+            found.append(np.zeros_like(pts))
+            continue
+        ahead = np.vstack([pts[k:], np.repeat(pts[-1:], k, axis=0)])
+        behind = np.vstack([np.repeat(pts[:1], k, axis=0), pts[:-k]])
+        d = ahead - behind
+        found.append(d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9))
+    return np.vstack(found) if found else np.zeros((0, 2))
+
+
+def find_ellipses(drawing: Drawing, count: int, max_size: float | None = None) -> list[Ellipse]:
     """Jusqu'à ``count`` ellipses, de la mieux tracée à la moins bien tracée."""
-    strokes = [s.points for s in drawing.strokes if len(s.points) >= 10]
-    if not strokes:
+    points = drawing.points
+    if len(points) < 10:
         return []
-    everything = np.vstack(strokes)
-    owner = np.concatenate([np.full(len(s), k) for k, s in enumerate(strokes)])
-    free = np.ones(len(everything), bool)
+    directions = tangents(drawing)
     max_size = max_size or 1.5 * drawing.extent
-    rng = np.random.default_rng(seed)
-    lengths = np.array([len(s) for s in strokes], float)
+    candidates = _candidates(drawing, points, directions, max_size)
+    free = np.ones(len(points), bool)
     found = []
     for _ in range(count):
-        best = None
-        for _ in range(TRIALS):
-            k = int(rng.choice(len(strokes), p=lengths / lengths.sum()))
-            span = int(rng.uniform(*WINDOW_MM) / STEP_MM)
-            stroke = strokes[k]
-            start = int(rng.integers(0, max(1, len(stroke) - span)))
-            index = np.flatnonzero(owner == k)[start:start + span]
-            window = everything[index[free[index]]]
-            candidate = _fit(window)
-            if candidate is None or candidate.major > max_size:
-                continue
-            for _ in range(2):  # réajustement sur les points proches
-                near = free & (candidate.distance(everything) <= TOLERANCE_MM)
-                refit = _fit(everything[near])
-                if refit is None or refit.major > max_size:
-                    break
-                candidate = refit
-            near = free & (candidate.distance(everything) <= TOLERANCE_MM)
-            coverage = _coverage(candidate, everything[near])
-            score = coverage ** 2 * candidate.perimeter  # une ellipse bien suivie d'abord
-            if best is None or score > best[0]:
-                candidate.points, candidate.coverage = everything[near], coverage
-                best = (score, candidate, near)
-        if best is None or best[1].coverage < MIN_COVERAGE:
+        ranked = sorted(candidates, key=lambda c: -_score(c[0], points[c[1] & free]))
+        # Les meilleures sont affinées : un tracé à main levée s'écarte de toute
+        # ellipse, la part suivie change beaucoup pour un petit déplacement.
+        polished = [_polish(e, points, directions, free) for e, _ in ranked[:POLISHED]]
+        if not polished:
             break
-        found.append(best[1])
-        free &= ~best[2]
+        chosen = max(polished, key=lambda e: _score(e, e.points))
+        if chosen.coverage < MIN_COVERAGE:
+            break
+        # Seuls les points qui la longent sont retirés pour chercher les
+        # suivantes ; pour les mesures (intervalles, jonctions), tous les points
+        # proches comptent, même là où un autre trait la croise.
+        free &= ~(chosen.traced(points, directions) & free)
+        chosen.points = points[chosen.distance(points) <= TOLERANCE_MM]
+        found.append(chosen)
     return found
+
+
+def _score(e: Ellipse, traced: np.ndarray) -> float:
+    """Une ellipse bien suivie sur tout son contour d'abord, puis la plus
+    grande. Chaque portion du contour compte d'autant plus que le tracé y passe
+    près : une ellipse coincée entre deux traits voisins (deux ellipses
+    concentriques) les longe tous deux de loin et compte peu."""
+    if not len(traced):
+        return 0.0
+    bins = np.floor((e.angles(traced) + np.pi) / (2 * np.pi) * 72).astype(int) % 72
+    closest = np.full(72, np.inf)
+    np.minimum.at(closest, bins, e.distance(traced))
+    near = np.clip(1 - closest / TOLERANCE_MM, 0, 1)
+    return float(near.mean()) ** 2 * e.perimeter
+
+
+def _polish(e: Ellipse, points: np.ndarray, directions: np.ndarray,
+            free: np.ndarray) -> Ellipse:
+    """Petits déplacements (centre, axes, orientation) tant que la part du
+    contour suivie par le tracé augmente."""
+
+    def placed(center, major, minor, angle) -> Ellipse:
+        axis = np.array([np.cos(angle), np.sin(angle)])
+        candidate = Ellipse(center, major, minor, axis, points[:0], 0.0)
+        kept = points[candidate.traced(points, directions) & free]
+        candidate.points, candidate.coverage = kept, coverage(candidate, kept)
+        return candidate
+
+    angle = float(np.arctan2(e.major_axis[1], e.major_axis[0]))
+    state = [e.center[0], e.center[1], e.major, e.minor, angle]
+    best = placed(np.array(state[:2]), *state[2:])
+    for step in POLISH_STEPS:
+        moves = [(0, step[0]), (1, step[0]), (2, step[1]), (3, step[1]), (4, np.radians(step[2]))]
+        improved = True
+        while improved:
+            improved = False
+            for k, delta in moves:
+                for sign in (-1, 1):
+                    trial = list(state)
+                    trial[k] += sign * delta
+                    if trial[3] < MIN_AXIS_MM or trial[3] > trial[2]:
+                        continue
+                    candidate = placed(np.array(trial[:2]), *trial[2:])
+                    if _score(candidate, candidate.points) > _score(best, best.points) + 1e-9:
+                        state, best, improved = trial, candidate, True
+    return best
+
+
+def _candidates(drawing: Drawing, points: np.ndarray, directions: np.ndarray,
+                max_size: float) -> list[tuple[Ellipse, np.ndarray]]:
+    """Ellipses ajustées sur des portions de chaque trait, puis réajustées sur
+    les points qui les longent ; celles qui reviennent au même sont fusionnées."""
+    tried: set[tuple[int, ...]] = set()  # ajustements sur une portion de trait
+    kept: set[tuple[int, ...]] = set()  # ellipses réajustées retenues
+    found = []
+    start = 0
+    for stroke in drawing.strokes:
+        index = np.arange(start, start + len(stroke.points))
+        start += len(stroke.points)
+        if len(index) < 10:
+            continue
+        step = max(1, int(round(WINDOW_STEP_MM / STEP_MM)))
+        for length in WINDOW_LENGTHS_MM:
+            span = int(round(length / STEP_MM))
+            for first in range(0, max(1, len(index) - span + 1), step):
+                candidate = fit(points[index[first:first + span]])
+                if candidate is None or candidate.major > max_size:
+                    continue
+                key = _key(candidate)
+                if key in tried:
+                    continue
+                tried.add(key)
+                settled = _settle(candidate, points, directions, max_size)
+                if settled is not None and _key(settled[0]) not in kept:
+                    kept.add(_key(settled[0]))
+                    found.append(settled)
+    return found
+
+
+def _key(e: Ellipse) -> tuple[int, ...]:
+    """Ellipses presque identiques (au mm et à 10° près) : même clé."""
+    angle = np.degrees(np.arctan2(e.major_axis[1], e.major_axis[0])) % 180
+    return (int(round(e.center[0])), int(round(e.center[1])), int(round(e.major)),
+            int(round(e.minor)), int(round(angle / 10)) % 18)
+
+
+def _settle(e: Ellipse, points: np.ndarray, directions: np.ndarray,
+            max_size: float) -> tuple[Ellipse, np.ndarray] | None:
+    """Réajuste l'ellipse sur les points qui la longent, jusqu'à ce qu'elle bouge peu."""
+    for _ in range(3):
+        traced = e.traced(points, directions)
+        refit = fit(points[traced])
+        if refit is None or refit.major > max_size:
+            break
+        e = refit
+    traced = e.traced(points, directions)
+    if traced.sum() < 6:
+        return None
+    return e, traced
 
 
 def straightest(ellipse: Ellipse) -> float:
@@ -208,25 +330,26 @@ def concentric(drawing: Drawing, ellipse: Ellipse, scales=np.linspace(1.05, 1.6,
                exclude: np.ndarray | None = None) -> Ellipse | None:
     """Ellipse de même centre et même orientation que ``ellipse``, agrandie
     ou réduite, la mieux suivie par le tracé (points de ``exclude`` écartés)."""
-    points = drawing.points
+    points, directions = drawing.points, tangents(drawing)
     if exclude is not None and len(exclude):
         far = np.sqrt(((points[:, None, :] - exclude[None, :, :]) ** 2).sum(-1)).min(1)
-        points = points[far > TOLERANCE_MM / 2]
+        points, directions = points[far > TOLERANCE_MM / 2], directions[far > TOLERANCE_MM / 2]
     best = None
     for scale in np.concatenate([scales, 1 / scales]):
         candidate = Ellipse(ellipse.center, ellipse.major * scale, ellipse.minor * scale,
                             ellipse.major_axis, points[:0], 0.0)
-        near = points[candidate.distance(points) <= TOLERANCE_MM]
-        coverage = _coverage(candidate, near)
-        if best is None or coverage > best.coverage:
-            candidate.points, candidate.coverage = near, coverage
+        traced = points[candidate.traced(points, directions)]
+        share = coverage(candidate, traced)
+        if best is None or share > best.coverage:
+            candidate.points, candidate.coverage = traced, share
             best = candidate
     if best is None or best.coverage < MIN_COVERAGE:
         return None
-    refit = _fit(best.points)
+    refit = fit(best.points)
     if refit is not None and np.linalg.norm(refit.center - ellipse.center) < 0.2 * ellipse.minor:
-        near = points[refit.distance(points) <= TOLERANCE_MM]
-        refit.points, refit.coverage = near, _coverage(refit, near)
+        traced = points[refit.traced(points, directions)]
+        refit.points, refit.coverage = traced, coverage(refit, traced)
         if refit.coverage >= best.coverage:
-            return refit
+            best = refit
+    best.points = points[best.distance(points) <= TOLERANCE_MM]  # pour les mesures
     return best

@@ -62,7 +62,7 @@ def correct_pages(inputs: list[PageInput], ink: str = "bleu",
             progress(index, len(inputs), page.scan.source)
         prepared = page.prepared or prepare_page(page.scan, ink)
         # La résolution a pu être corrigée à la main depuis la préparation.
-        prepared = replace(prepared, px_per_mm=page.scan.dpi / MM_PAR_POUCE)
+        prepared = replace(prepared, px_per_mm=page.scan.dpi / MM_PAR_POUCE * prepared.scale)
         layout = prepared.layout(page.number)
         correction.pages.append((page.scan.source, page.number))
         separator_mm = layout.separator.length / layout.px_per_mm

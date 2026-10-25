@@ -181,7 +181,7 @@ def flower(center, petals: int = 6, length: float = 30.0, width: float = 8.0, be
     return found
 
 
-def wheels(left_center=(26, 52), left: float = 25.0, right: float = 20.0, offset=(15, -15),
+def wheels(left_center=(27, 52), left: float = 25.0, right: float = 20.0, offset=(15, -15),
            chords=(6, 6), tilt: float = 0.0, axle: bool = True):
     """Deux roues de l'item 21 (rayons ``left`` et ``right``), ``chords``
     diamètres régulièrement espacés dans chacune (le premier horizontal, tourné
