@@ -6,14 +6,15 @@ cotation que l'ergothérapeute valide.
 
 ## État
 
-- Items **1 à 18** pris en charge, avec tous leurs critères : Général, Motricité
-  A/B, Global C/D, Local E/F (pas de Local pour les items 1 à 3).
+- Items **1 à 21** (tout le subtest) pris en charge, avec tous leurs critères :
+  Général, Motricité A/B, Global C/D, Local E/F (pas de Local pour les items 1
+  à 3).
 - Chaque critère est accompagné des mesures qui le justifient (longueurs en mm,
   angles, rapports).
 - Les items douteux sont signalés **« à vérifier »** : mesure proche d'un seuil,
   trait repassé à côté du premier tracé, zone vide.
-- Premier essai sur un protocole réel : 107 critères sur 120 identiques à la
-  cotation de l'ergothérapeute (kappa de Cohen 0,77).
+- Premier essai sur un protocole réel : 124 critères sur 141 identiques à la
+  cotation de l'ergothérapeute (kappa de Cohen 0,75).
 
 ## Pour l'ergothérapeute : le logiciel Windows
 
@@ -105,7 +106,9 @@ des désaccords. Les deux fichiers ont les colonnes
    recollement des traits qui se croisent, puis découpage en lignes droites
    (avec leurs interruptions et les passages repassés).
 5. **Critères** (`criteria/`) : un module par item, qui applique les seuils du
-   manuel (reformulés) aux mesures.
+   manuel (reformulés) aux mesures. Des modules communs retrouvent les lignes
+   courbes (`curves.py`), les régions fermées et les polygones (`polygons.py`)
+   et les ellipses (`ellipses.py`).
 6. **Rapport** (`report.py`, `compare.py`) : CSV, HTML et comparaison avec la
    cotation de référence.
 7. **Interface** (`gui.py`) : fenêtre Tkinter ; `packaging/` contient de quoi
@@ -124,7 +127,9 @@ partir du manuel et ne le remplacent pas.
 
 ## Limites connues
 
-- Items 9 à 21 pas encore traités.
+- Les items 9 à 21 n'ont été réglés que sur un protocole réel. Les rayons
+  d'une roue dessinés à main levée (item 21) et les pétales mal fermés
+  (item 20) sont repérés de façon approchée : le rapport les montre, à vérifier.
 - Certains cas restent ambigus entre la règle et le jugement de
   l'ergothérapeute : trait repassé à côté du premier tracé, ligne légèrement
   courbée jugée « non droite ». Ils doivent être revus à la main.

@@ -133,6 +133,73 @@ def stairs_points(top_left, step: float = 12.3, steps: int = 4, heights=None):
     return points + [(x, y)]
 
 
+def bucket(top_center, a: float = 28.0, b: float = 15.6, inner: float = 0.8, drop: float = 24.0,
+           base_scale: float = 1.0):
+    """Seau de l'item 19 : deux ellipses concentriques en haut, verticales, et
+    ellipse de base visible à l'avant et dans l'ouverture. Renvoie (points,
+    fermé) pour chaque trait."""
+    x, y = top_center
+    t = np.linspace(0, 2 * np.pi, 360)
+    outer = np.column_stack([x + a * np.cos(t), y + b * np.sin(t)])
+    inner_pts = np.column_stack([x + inner * a * np.cos(t), y + inner * b * np.sin(t)])
+    ba, bb, by = a * base_scale, b * base_scale, y + drop
+    front = np.column_stack([x + ba * np.cos(t[:181]), by + bb * np.sin(t[:181])])
+    back = np.column_stack([x + ba * np.cos(t[180:]), by + bb * np.sin(t[180:])])
+    seen = (((back[:, 0] - x) / (inner * a)) ** 2 + ((back[:, 1] - y) / (inner * b)) ** 2) < 1
+    strokes = [(outer, True), (inner_pts, True), (front, False),
+               ([(x - a, y), (x - ba, by)], False), ([(x + a, y), (x + ba, by)], False)]
+    if seen.any():
+        strokes.append((back[seen], False))
+    return strokes
+
+
+def flower(center, petals: int = 6, length: float = 30.0, width: float = 8.0, bend: float = 1.5,
+           start_deg: float = 90.0, lengths=None, starts=None, blunt: bool = False):
+    """Fleur de l'item 20 : pétales pointus aux bords en « S », tournant tous
+    dans le même sens. ``starts`` : distance au centre où part chaque pétale ;
+    ``blunt`` : bouts arrondis. Renvoie le contour de chaque pétale."""
+    c = np.asarray(center, float)
+    found = []
+    for k in range(petals):
+        size = lengths[k] if lengths else length
+        angle = np.radians(start_deg + k * 360.0 / petals)
+        along = np.array([np.cos(angle), -np.sin(angle)])
+        across = np.array([-along[1], along[0]])
+        base = c + along * (starts[k] if starts else 0.0)
+        u = np.linspace(0, 1, 80)
+        if blunt:
+            r = width / 2
+            s = u * size
+            half = np.where(s > size - r, np.sqrt(np.clip(r ** 2 - (s - size + r) ** 2, 0, None)),
+                            r * np.sin(np.pi * np.minimum(u, 0.5)) ** 0.8)
+        else:
+            half = width / 2 * np.sin(np.pi * u) ** 0.8
+        shift = bend * np.sin(2 * np.pi * u)
+        left = base + np.outer(u * size, along) + np.outer(half + shift, across)
+        right = base + np.outer(u * size, along) + np.outer(-half + shift, across)
+        found.append(np.vstack([left, right[::-1][1:-1]]))
+    return found
+
+
+def wheels(left_center=(26, 52), left: float = 25.0, right: float = 20.0, offset=(15, -15),
+           chords=(6, 6), tilt: float = 0.0, axle: bool = True):
+    """Deux roues de l'item 21 (rayons ``left`` et ``right``), ``chords``
+    diamètres régulièrement espacés dans chacune (le premier horizontal, tourné
+    de ``tilt`` degrés) et l'essieu entre les centres. Renvoie (points, fermé)
+    pour chaque trait."""
+    a = np.asarray(left_center, float)
+    b = a + np.asarray(offset, float)
+    strokes = [(circle_points(a, left), True), (circle_points(b, right), True)]
+    for center, radius, count in ((a, left, chords[0]), (b, right, chords[1])):
+        for k in range(count):
+            angle = np.radians(tilt + k * 180.0 / count)
+            u = np.array([np.cos(angle), -np.sin(angle)]) * radius
+            strokes.append(([center - u, center + u], False))
+    if axle:
+        strokes.append(([a, b], False))
+    return strokes
+
+
 def circle_points(center, radius: float, start_deg: float = 0, sweep_deg: float = 360,
                   ry: float | None = None) -> np.ndarray:
     angles = np.radians(np.linspace(start_deg, start_deg + sweep_deg, 240))
@@ -204,6 +271,15 @@ def draw_model(item: int, image: np.ndarray, color=BLUE_PEN, wobble: float = 0.0
         draw(right, closed=True, seed=1)
     elif item == 18:
         draw(stairs_points((7.5, 20)), closed=True)
+    elif item == 19:
+        for i, (points, closed) in enumerate(bucket((32, 30))):
+            draw(points, closed=closed, seed=i)
+    elif item == 20:
+        for i, petal in enumerate(flower((32, 44))):
+            draw(petal, closed=True, seed=i)
+    elif item == 21:
+        for i, (points, closed) in enumerate(wheels()):
+            draw(points, closed=closed, seed=i)
     else:
         raise ValueError(item)
     return image

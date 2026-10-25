@@ -36,6 +36,7 @@ class Raster:
     mask: np.ndarray  # traits redessinés (1), fond (0)
     origin: np.ndarray  # coin (mm) du pixel (0, 0)
     gaps: list[float]  # interruptions recousues (mm)
+    gap_points: list[np.ndarray]  # milieu de chaque interruption recousue
 
     def to_mm(self, contour: np.ndarray) -> np.ndarray:
         return contour.reshape(-1, 2).astype(float) / PX_PER_MM + self.origin
@@ -55,7 +56,7 @@ def raster(drawing: Drawing) -> Raster | None:
 
     for stroke in strokes:
         cv2.polylines(mask, [px(stroke.points)], stroke.closed, 1, 2)
-    gaps = []
+    gaps, gap_points = [], []
 
     def bridge(a: np.ndarray, b: np.ndarray) -> None:
         cv2.line(mask, tuple(px(a)[0]), tuple(px(b)[0]), 1, 2)
@@ -70,6 +71,7 @@ def raster(drawing: Drawing) -> Raster | None:
         length = longest * float(np.linalg.norm(b - a)) / max(len(samples) - 1, 1)
         if length > MIN_GAP_MM:
             gaps.append(length)
+            gap_points.append((a + b) / 2)
 
     # Chaque bout de trait est relié au point d'encre le plus proche (d'un
     # autre trait, ou du même trait plus loin) s'il est à moins de 3 mm.
@@ -94,7 +96,7 @@ def raster(drawing: Drawing) -> Raster | None:
             i, m = np.unravel_index(int(np.argmin(dist)), dist.shape)
             if 0.3 < dist[i, m] <= GAP_MM:
                 bridge(a[i], b[m])
-    return Raster(mask, origin, gaps)
+    return Raster(mask, origin, gaps, gap_points)
 
 
 def _opened(mask: np.ndarray) -> np.ndarray:
@@ -123,8 +125,9 @@ def silhouette(drawing: Drawing) -> np.ndarray | None:
     return _clockwise(r.to_mm(max(contours, key=cv2.contourArea)))
 
 
-def regions(drawing: Drawing) -> list[np.ndarray]:
-    """Contours (mm) des régions fermées délimitées par les traits."""
+def regions(drawing: Drawing, opened: bool = True) -> list[np.ndarray]:
+    """Contours (mm) des régions fermées délimitées par les traits ; sans
+    ``opened``, les pointes fines des régions sont gardées."""
     r = raster(drawing)
     if r is None:
         return []
@@ -134,7 +137,9 @@ def regions(drawing: Drawing) -> list[np.ndarray]:
     for label in range(1, count):
         if label in border:
             continue
-        region = _opened((labels == label).astype(np.uint8))
+        region = (labels == label).astype(np.uint8)
+        if opened:
+            region = _opened(region)
         if region.sum() < MIN_REGION_MM2 * PX_PER_MM ** 2:
             continue
         contours, _ = cv2.findContours(region, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)

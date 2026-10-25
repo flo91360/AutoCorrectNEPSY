@@ -90,6 +90,19 @@ def split_line(line: StraightLine, points: list[np.ndarray],
     return parts
 
 
+def separate_extras(drawing: Drawing, figure: np.ndarray, distance: float = 2.0) -> list[float]:
+    """Tailles (mm) des taches d'encre séparées, loin de la figure (points
+    ``figure``) : éléments ajoutés."""
+    found = []
+    for blob in drawing.blobs:
+        if blob.length < EXTRA_ELEMENT_MM:
+            continue
+        gap = np.sqrt(((blob.outline[::4, None, :] - figure[None, :, :]) ** 2).sum(-1)).min()
+        if gap > distance:
+            found.append(blob.length)
+    return found
+
+
 def dangling_tail(drawing: Drawing, figure: list[StraightLine], point: np.ndarray) -> float:
     """Longueur (mm) du plus long bout de trait libre qui part de ``point`` :
     un petit trait hors de la figure, accroché à cette jonction par un bout et
