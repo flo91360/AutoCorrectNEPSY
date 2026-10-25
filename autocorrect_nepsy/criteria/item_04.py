@@ -10,6 +10,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from . import marks as mk
 from .shapes import check_lines, end_at, extra_elements, intersection, review_notes
 
 GENERAL_MAX_RATIO = 2.0  # rapport plus long / plus court côté
@@ -36,8 +37,11 @@ def score(drawing: Drawing, item: int = 4) -> ItemResult:
     check_lines(checks["A"], lines, STRAIGHT_BAND_MM, MAX_INTERRUPTIONS)
     checks["E"].add(len(lines) == 4, f"seulement quatre lignes ({len(lines)} trouvée(s))")
 
+    marks: list = [mk.bande(line) for line in lines]
+
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     if len(horizontals) < 2 or len(verticals) < 2:
         reason = (f"figure à quatre côtés non reconnue ({len(horizontals)} côté(s) "
@@ -73,6 +77,11 @@ def score(drawing: Drawing, item: int = 4) -> ItemResult:
     near_overshoots = any(abs(o - OVERSHOOT_MM) <= 0.5 for o in overshoots)
     ratio = max(sides.values()) / max(min(sides.values()), 1e-6)
     longest = max(sides.values())
+    for (a, b), side in zip(((tl, tr), (br, bl), (bl, tl), (tr, br)), sides):
+        marks.append(mk.cote(a, b, fmt(sides[side])))
+    for name, (vertex, p1, p2) in {"haut-gauche": (tl, tr, bl), "haut-droit": (tr, tl, br),
+                                    "bas-droit": (br, tr, bl), "bas-gauche": (bl, br, tl)}.items():
+        marks.append(mk.angle(vertex, p1, p2, f"{angles[name]:.0f}°"))
     measures.update({f"cote_{k}_mm": float(v) for k, v in sides.items()})
     measures.update({f"angle_{k}_deg": v for k, v in angles.items()})
     measures["rapport_cotes"] = ratio

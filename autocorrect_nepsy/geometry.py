@@ -50,36 +50,59 @@ def line_intersection(p1: np.ndarray, d1: np.ndarray,
     return p1 + t * d1
 
 
-def min_strip_width(points: np.ndarray) -> float:
-    """Largeur de la plus étroite bande droite contenant tous les points.
+def min_strip(points: np.ndarray) -> tuple[float, np.ndarray]:
+    """Plus étroite bande droite contenant tous les points : sa largeur et les
+    quatre coins du rectangle qui la limite aux points (pour la dessiner).
 
     C'est l'équivalent de la « barre grisée » de la grille de correction :
     un trait est droit s'il tient entièrement dans une bande de cette largeur.
     """
-    if len(points) < 3:
-        return 0.0
-    hull = cv2.convexHull(points.astype(np.float32)).reshape(-1, 2).astype(float)
+    hull = (cv2.convexHull(points.astype(np.float32)).reshape(-1, 2).astype(float)
+            if len(points) >= 3 else points.astype(float))
     if len(hull) < 3:
-        return 0.0
-    best = np.inf
+        if len(points) == 0:
+            return 0.0, np.zeros((4, 2))
+        a, b = points[0], points[-1]
+        return 0.0, np.array([a, b, b, a], float)
+    best = None
     for i in range(len(hull)):
         a, b = hull[i], hull[(i + 1) % len(hull)]
-        edge = b - a
-        length = np.linalg.norm(edge)
+        length = np.linalg.norm(b - a)
         if length == 0:
             continue
-        normal = np.array([-edge[1], edge[0]]) / length
-        best = min(best, float(np.max(np.abs((hull - a) @ normal))))
-    return best
+        along = (b - a) / length
+        normal = np.array([-along[1], along[0]])
+        offsets = (hull - a) @ normal
+        width = float(offsets.max() - offsets.min())
+        if best is None or width < best[0]:
+            t = (hull - a) @ along
+            best = (width, a, along, normal, t.min(), t.max(), offsets.min(), offsets.max())
+    width, a, along, normal, t0, t1, n0, n1 = best
+    corners = np.array([a + along * t + normal * n
+                        for t, n in ((t0, n0), (t1, n0), (t1, n1), (t0, n1))])
+    return width, corners
+
+
+def min_strip_width(points: np.ndarray) -> float:
+    """Largeur de la plus étroite bande droite contenant tous les points."""
+    return min_strip(points)[0] if len(points) >= 3 else 0.0
+
+
+def max_diameter_ends(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Les deux points les plus éloignés (extrémités du diamètre de Feret)."""
+    hull = (cv2.convexHull(points.astype(np.float32)).reshape(-1, 2).astype(float)
+            if len(points) >= 3 else points.astype(float))
+    diff = hull[:, None, :] - hull[None, :, :]
+    i, j = np.unravel_index(np.argmax((diff ** 2).sum(-1)), (len(hull), len(hull)))
+    return hull[i], hull[j]
 
 
 def max_diameter(points: np.ndarray) -> float:
     """Plus grande distance entre deux points (diamètre de Feret)."""
     if len(points) < 2:
         return 0.0
-    hull = cv2.convexHull(points.astype(np.float32)).reshape(-1, 2).astype(float)
-    diff = hull[:, None, :] - hull[None, :, :]
-    return float(np.sqrt((diff ** 2).sum(-1)).max())
+    a, b = max_diameter_ends(points)
+    return float(np.linalg.norm(b - a))
 
 
 def path_length(points: np.ndarray, closed: bool = False) -> float:

@@ -10,6 +10,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from . import marks as mk
 from .shapes import (check_direction_changes, check_lines, end_at, extra_elements,
                      intersection, review_notes)
 
@@ -35,8 +36,11 @@ def score(drawing: Drawing, item: int = 6) -> ItemResult:
     check_lines(checks["A"], lines, STRAIGHT_BAND_MM)
     check_direction_changes(checks["B"], lines, MAX_DIRECTION_CHANGES)
 
+    marks: list = [mk.bande(line) for line in lines]
+
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     apex = intersection(lines[0], lines[1]) if len(lines) >= 2 else None
     if apex is None:
@@ -56,6 +60,13 @@ def score(drawing: Drawing, item: int = 6) -> ItemResult:
     lengths = [left.length, right.length]
     ratio = max(lengths) / max(min(lengths), 1e-6)
     two_lines = len(lines) == 2
+    marks += [mk.line_length(left), mk.line_length(right),
+              mk.angle(apex, far[0], far[1], f"{apex_angle:.0f}°")]
+    for end, slope in zip(far, slopes):
+        toward_apex = np.array([np.sign(apex[0] - end[0]) or 1.0, 0.0])
+        marks.append(mk.angle(end, end + toward_apex * 12, apex, f"{slope:.0f}° / horizontale"))
+    if gap >= 0.5 or overshoot >= 0.5:
+        marks.append(mk.point(apex, f"intervalle {fmt(gap)}, dépassement {fmt(overshoot)}"))
     measures.update({"ligne_gauche_mm": left.length, "ligne_droite_mm": right.length,
                      "intervalle_mm": gap, "depassement_mm": overshoot,
                      "angle_sommet_deg": apex_angle, "pente_gauche_deg": slopes[0],

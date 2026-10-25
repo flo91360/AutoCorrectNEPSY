@@ -10,6 +10,7 @@ import numpy as np
 
 from .. import geometry as geo
 from ..strokes import Drawing
+from . import marks as mk
 from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
 from .shapes import (STRAIGHT_MARGIN_MM, CircleMetrics, circle_metrics, circular_strokes,
                      filled_mask)
@@ -32,6 +33,7 @@ def score(drawing: Drawing, item: int = 8) -> ItemResult:
         return empty_result(item, codes, "aucun tracé dans la zone")
     circles = circular_strokes(drawing)
     metrics = [circle_metrics(c, drawing.stroke_width) for c in circles]
+    marks = [mk.segment(*m.long_ends, f"Ø {fmt(m.long_diameter)}") for m in metrics]
     checks = {code: Checks() for code in codes}
     measures: dict[str, float] = {"nombre_cercles": len(circles)}
 
@@ -49,7 +51,8 @@ def score(drawing: Drawing, item: int = 8) -> ItemResult:
         reason = f"{len(circles)} figure(s) circulaire(s) reconnue(s), il en faut 3"
         for code in ("G", "C", "D", "E", "F"):
             checks[code].fail(reason)
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures,
+                          marks=marks)
 
     order = np.argsort([m.center[1] for m in metrics])
     circles = [circles[i] for i in order]
@@ -67,7 +70,11 @@ def score(drawing: Drawing, item: int = 8) -> ItemResult:
     size = drawing.points.max(axis=0) - origin + 2
     shape = (int(size[1] * RASTER_PX_PER_MM) + 1, int(size[0] * RASTER_PX_PER_MM) + 1)
     masks = [filled_mask(c, origin, shape, RASTER_PX_PER_MM) for c in circles]
-    overlaps = [_overlap_width(masks[i], masks[i + 1]) for i in range(len(masks) - 1)]
+    lenses = [_overlap_circle(masks[i], masks[i + 1]) for i in range(len(masks) - 1)]
+    overlaps = [width for width, _ in lenses]
+    for width, center in lenses:
+        if center is not None:
+            marks.append(mk.cercle(origin + center, width / 2, f"chevauchement {fmt(width)}"))
     measures.update({f"chevauchement_{i + 1}_{i + 2}_mm": w for i, w in enumerate(overlaps)})
     if three:
         neighbours_cut = all(w > 0 for w in overlaps)
@@ -109,7 +116,7 @@ def score(drawing: Drawing, item: int = 8) -> ItemResult:
     checks["F"].limit(worst, f"rapport des diamètres d'un même cercle {fmt_ratio(worst)} ≤ 1,5:1",
                       high=LOCAL_MAX_OWN_RATIO, unit="ratio")
 
-    return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures)
+    return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
 
 
 def _cross_ratio(metrics: list[CircleMetrics]) -> float:
@@ -129,11 +136,19 @@ def _distorted(m: CircleMetrics) -> bool:
 
 def _overlap_width(a: np.ndarray, b: np.ndarray) -> float:
     """Diamètre (mm) du plus grand cercle qui tient dans la zone commune."""
+    return _overlap_circle(a, b)[0]
+
+
+def _overlap_circle(a: np.ndarray, b: np.ndarray) -> tuple[float, np.ndarray | None]:
+    """Plus grand cercle qui tient dans la zone commune : diamètre (mm) et
+    centre (mm, dans le repère des masques), comme le cercle grisé du manuel."""
     lens = (a & b).astype(np.uint8)
     if not lens.any():
-        return 0.0
-    dist = cv2.distanceTransform(np.pad(lens, 1), cv2.DIST_L2, 5)
-    return float(2 * dist.max() / RASTER_PX_PER_MM)
+        return 0.0, None
+    dist = cv2.distanceTransform(np.pad(lens, 1), cv2.DIST_L2, 5)[1:-1, 1:-1]
+    row, col = np.unravel_index(int(np.argmax(dist)), dist.shape)
+    center = np.array([col, row], float) / RASTER_PX_PER_MM
+    return float(2 * dist.max() / RASTER_PX_PER_MM), center
 
 
 def _min_distance(a: np.ndarray, b: np.ndarray) -> float:

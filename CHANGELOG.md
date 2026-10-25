@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.3.0] - 2026-10-25
+
+- Rapport : les mesures de l'outil (longueurs, angles, barre grisée, diamètres, chevauchements) sont dessinées sur les traits de chaque item, pour pouvoir les vérifier sans les annotations de l'ergothérapeute
+
 ## [0.2.6] - 2026-10-25
 
 - Ne plus couper un trait continu là où l'encre du stylo est plus foncée (l'outil y voyait à tort une interruption du tracé)

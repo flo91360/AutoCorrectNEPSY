@@ -66,6 +66,7 @@ class ItemResult:
     criteria: dict[str, Criterion]
     measures: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    marks: list = field(default_factory=list)  # repères de mesure (voir marks.py)
 
     def score(self, code: str) -> int | None:
         criterion = self.criteria.get(code)

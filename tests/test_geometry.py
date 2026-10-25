@@ -70,3 +70,20 @@ def test_resample_step():
     out = geo.resample(pts, 1.0)
     assert len(out) == 11
     assert np.diff(out[:, 0]) == pytest.approx(np.ones(10))
+
+
+def test_min_strip_rectangle_contains_points():
+    rng = np.random.default_rng(1)
+    pts = np.column_stack([rng.uniform(0, 30, 200), rng.uniform(-1, 1, 200)])
+    pts = pts @ np.array([[0.8, 0.6], [-0.6, 0.8]])  # bande inclinée
+    width, corners = geo.min_strip(pts)
+    assert width == pytest.approx(geo.min_strip_width(pts))
+    assert width <= 2.0
+    assert np.linalg.norm(corners[1] - corners[0]) == pytest.approx(30, abs=1.0)
+    assert np.linalg.norm(corners[3] - corners[0]) == pytest.approx(width, abs=1e-6)
+
+
+def test_max_diameter_ends():
+    pts = np.array([(0, 0), (3, 4), (1, 1)], float)
+    a, b = geo.max_diameter_ends(pts)
+    assert {tuple(a), tuple(b)} == {(0.0, 0.0), (3.0, 4.0)}

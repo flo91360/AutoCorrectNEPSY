@@ -5,9 +5,12 @@ Seuils repris du manuel NEPSY-II (Copie de figures), reformulés.
 
 from __future__ import annotations
 
+import numpy as np
+
 from .. import geometry as geo
 from ..strokes import Drawing, StraightLine
 from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from . import marks as mk
 from .shapes import (check_direction_changes, check_lines, extra_elements, intersection,
                      outside, review_notes)
 
@@ -42,8 +45,11 @@ def score(drawing: Drawing, item: int = 7) -> ItemResult:
     check_lines(checks["A"], lines, STRAIGHT_BAND_MM, MAX_INTERRUPTIONS)
     check_direction_changes(checks["B"], lines, MAX_DIRECTION_CHANGES)
 
+    marks: list = [mk.bande(line, at="bout") for line in lines]
+
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     horizontals = [l for l in lines if l.angle_to_horizontal() <= 45]
     verticals = [l for l in lines if l.angle_to_horizontal() > 45]
@@ -85,6 +91,17 @@ def score(drawing: Drawing, item: int = 7) -> ItemResult:
     center_ratio = seg_center / max(side, 1e-6)
     crossing_angles = [geo.angle_between(horizontal.direction, v.direction) for v in (v_left, v_right)]
     three_lines = len(lines) == 3
+    on_h = [horizontal.center + t * horizontal.direction
+            for t in (horizontal.t0, t_cross[0], t_cross[1], horizontal.t1)]
+    for (a, b), length in zip(zip(on_h, on_h[1:]), (seg_left, seg_center, seg_right)):
+        marks.append(mk.cote(a, b, fmt(length), side=(0.0, 1.0)))
+    for v, p, side in ((v_left, crossings[0], (-1.0, 0.0)), (v_right, crossings[1], (1.0, 0.0))):
+        top, bottom = sorted(v.ends, key=lambda q: q[1])
+        up, down = _above_below(v, p)
+        marks += [mk.cote(top, p, fmt(up), side=side), mk.cote(p, bottom, fmt(down), side=side)]
+    for v, p, value in zip((v_left, v_right), crossings, crossing_angles):
+        top = min(v.ends, key=lambda q: q[1])
+        marks.append(mk.angle(p, p + np.asarray(horizontal.direction) * 8, top, f"{value:.0f}°"))
     measures.update({"horizontale_mm": horizontal.length, "segment_gauche_mm": seg_left,
                      "segment_central_mm": seg_center, "segment_droit_mm": seg_right,
                      "rapport_segments_verticaux": pair_ratio,
