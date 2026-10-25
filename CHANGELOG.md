@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.2.6] - 2026-10-25
+
+- Ne plus couper un trait continu là où l'encre du stylo est plus foncée (l'outil y voyait à tort une interruption du tracé)
+
 ## [0.2.5] - 2026-10-24
 
 - Rapport détaillé : le dessin de l'enfant et les traits lus par l'outil sont affichés côte à côte au lieu d'être superposés.

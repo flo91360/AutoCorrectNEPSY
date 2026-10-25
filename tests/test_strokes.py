@@ -4,7 +4,8 @@ import pytest
 from autocorrect_nepsy.ink import ink_mask, printed_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
-from synth import PENCIL, PRINT_BLACK, PX_PER_MM, canvas, circle_points, polyline
+from synth import (DARK_BLUE_PEN, PENCIL, PRINT_BLACK, PX_PER_MM, canvas, circle_points,
+                   polyline)
 
 
 def drawing_of(image):
@@ -20,6 +21,28 @@ def test_blue_pen_is_separated_from_pencil_and_print():
     ys = np.nonzero(ink)[0] / PX_PER_MM
     assert ys.min() > 18 and ys.max() < 22
     assert printed_mask(image)[int(60 * PX_PER_MM), int(30 * PX_PER_MM)] == 1
+
+
+def test_darker_ink_does_not_cut_a_continuous_stroke():
+    # Sur 3 mm, le stylo a laissé une encre plus épaisse : bleu presque noir.
+    image = canvas()
+    polyline(image, [(10, 40), (54, 40)])
+    polyline(image, [(30, 40), (33, 40)], color=DARK_BLUE_PEN)
+    drawing = drawing_of(image)
+    assert len(drawing.strokes) == 1
+    [line] = drawing.significant_lines()
+    assert line.interruptions == 0
+    assert line.length == pytest.approx(44, abs=1.0)
+
+
+def test_pencil_touching_the_stroke_is_not_ink():
+    image = canvas()
+    polyline(image, [(10, 40), (54, 40)])
+    polyline(image, [(30, 20), (30, 60)], color=PENCIL)
+    ink = ink_mask(image)
+    pencil_only = ink[int(25 * PX_PER_MM):int(35 * PX_PER_MM), int(29 * PX_PER_MM):int(31 * PX_PER_MM)]
+    assert pencil_only.sum() == 0
+    assert len(drawing_of(image).significant_lines()) == 1
 
 
 def test_empty_zone():

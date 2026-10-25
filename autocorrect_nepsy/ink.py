@@ -17,19 +17,44 @@ INK_HUES = {
     "vert": (40, 90),
 }
 MIN_INK_SATURATION = 70
+# Là où le stylo dépose plus d'encre, le trait devient presque noir et moins
+# saturé : ces pixels sont gardés s'ils touchent un trait nettement coloré et
+# s'ils sont au moins aussi foncés que la moitié du chemin entre le fond et
+# l'encre (le liseré clair et flou au bord du trait n'est pas de l'encre).
+MIN_DARK_INK_SATURATION = 40
+DARK_INK_CONTRAST = 0.5
 MAX_PRINT_SATURATION = 60
 
 
 def ink_mask(image_bgr: np.ndarray, ink: str = "bleu") -> np.ndarray:
-    """Masque binaire (uint8 0/1) des pixels de l'encre de l'enfant."""
+    """Masque binaire (uint8 0/1) des pixels de l'encre de l'enfant.
+
+    Seuillage à deux niveaux : les pixels nettement colorés servent de point de
+    départ, et les pixels de la même teinte mais plus foncés (encre épaisse)
+    sont ajoutés quand ils les prolongent. Sans cela, un trait continu serait
+    coupé là où l'encre est plus foncée, et compté comme interrompu. Le crayon
+    de l'ergothérapeute, gris et sans teinte, reste exclu.
+    """
     if ink not in INK_HUES:
         raise ValueError(f"encre inconnue : {ink} (choix : {', '.join(INK_HUES)})")
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
     hue, sat = hsv[..., 0], hsv[..., 1]
     lo, hi = INK_HUES[ink]
     hue_ok = (hue >= lo) & (hue <= hi) if lo <= hi else (hue >= lo) | (hue <= hi)
-    mask = (hue_ok & (sat >= MIN_INK_SATURATION)).astype(np.uint8)
-    return cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    strong = (hue_ok & (sat >= MIN_INK_SATURATION)).astype(np.uint8)
+    strong = cv2.morphologyEx(strong, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    if not strong.any():
+        return strong
+    value = hsv[..., 2].astype(np.float32)
+    background = float(np.median(value))
+    darkest = background - DARK_INK_CONTRAST * (background - float(np.median(value[strong > 0])))
+    dark = hue_ok & (sat >= MIN_DARK_INK_SATURATION) & (value <= darkest)
+    candidates = dark.astype(np.uint8) | strong
+    count, labels = cv2.connectedComponents(candidates, connectivity=8)
+    keep = np.zeros(count, bool)
+    keep[np.unique(labels[strong > 0])] = True
+    keep[0] = False
+    return keep[labels].astype(np.uint8)
 
 
 def printed_mask(image_bgr: np.ndarray) -> np.ndarray:
