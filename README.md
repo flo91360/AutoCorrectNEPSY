@@ -50,8 +50,10 @@ Lancer la fenêtre : `python -m autocorrect_nepsy` (ou `autocorrect-nepsy-gui`).
 
 ### Scanner les pages
 
-- Une page du cahier par page de PDF (ou par image), à 200 dpi minimum
-  (300 dpi conseillés), **en taille réelle**, sans redimensionner.
+- Une page du cahier par page de PDF (ou par image), **en couleur**, à 200 ou
+  300 dpi, **en taille réelle**, sans redimensionner. Un scan plus fin est
+  ramené à 200 dpi, la résolution de réglage de l'outil : il n'apporte rien de
+  plus, et la cotation ne dépend pas de la résolution du scan.
 - Le sens du scan n'a pas d'importance, une légère inclinaison est corrigée.
 - L'enfant dessine au **stylo** (bleu par défaut, voir `--encre`). Les
   annotations de l'ergothérapeute au crayon à papier sont ignorées.

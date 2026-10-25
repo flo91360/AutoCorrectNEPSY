@@ -10,6 +10,8 @@ base, seuls l'avant et la partie vue dans l'ouverture sont dessinés.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import cv2
 import numpy as np
 
@@ -17,7 +19,7 @@ from .. import geometry as geo
 from ..strokes import STEP_MM, Drawing, StraightLine
 from . import marks as mk
 from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
-from .ellipses import Ellipse, concentric, crosses, find_ellipses, straightest
+from .ellipses import Ellipse, concentric, crosses, find_ellipses, straightest, tangents
 from .shapes import EXTRA_ELEMENT_MM, separate_extras
 
 JOIN_MM = 1.0  # Général et Motricité A : intervalle aux jonctions
@@ -28,6 +30,8 @@ RING_MAX_MM = 1.0  # Général et Local E : l'ellipse de base entre dans l'annea
 VERTICAL_MAX_DEG = 25.0  # lignes verticales
 VERTICAL_NEAR_MM = 6.0  # une verticale part du côté de l'ellipse externe
 ON_ELLIPSE_MM = 1.2  # point d'une ellipse (pas d'une verticale)
+ON_LINE_MM = 1.0  # point d'une verticale ou de son prolongement (pas d'une ellipse)
+LINE_EXTENSION_MM = 6.0
 MIN_OVERLAP_MM = 2.0  # Global C : chevauchement base / ellipse interne
 HORIZONTAL_LOOSE_DEG = 20.0  # Global C : grands axes « relativement » horizontaux
 AXIS_MAX_DEG = 5.0  # Global D
@@ -101,7 +105,7 @@ def score(drawing: Drawing, item: int = 19) -> ItemResult:
                       high=GAP_MM)
     checks["A"].limit(join, f"plus grand intervalle aux jonctions des verticales {fmt(join)} "
                       "≤ 1 mm", high=JOIN_MM)
-    straight = max(straightest(e) for e in ellipses.values())
+    straight = max(straightest(_without(e, verticals)) for e in ellipses.values())
     measures["portion_droite_max_mm"] = straight
     checks["B"].limit(straight, f"plus longue portion droite d'ellipse {fmt(straight)} ≤ 7 mm",
                       high=STRAIGHT_MAX_MM)
@@ -146,25 +150,52 @@ def score(drawing: Drawing, item: int = 19) -> ItemResult:
 
 
 def _bucket(drawing: Drawing) -> tuple[Ellipse, Ellipse, Ellipse] | None:
-    """Ellipses supérieure externe, supérieure interne et de base."""
+    """Ellipses supérieure externe, supérieure interne et de base. L'interne
+    est une autre ellipse trouvée dans l'externe (même mal centrée) ou, à
+    défaut, l'ellipse concentrique la mieux suivie."""
     found = find_ellipses(drawing, 4)
     if len(found) < 2:
         return None
     best = None
     for upper in found:
-        partner = concentric(drawing, upper, exclude=upper.points)
-        if partner is None:
-            continue
-        pair = sorted((upper, partner), key=lambda e: e.major)
-        below = [e for e in found if e is not upper and e.center[1] > upper.center[1] + 0.3 * upper.minor
-                 and np.linalg.norm(e.center - partner.center) > 0.2 * upper.minor]
-        if not below:
-            continue
-        base = max(below, key=lambda e: e.coverage)
-        score = upper.coverage + partner.coverage + base.coverage
-        if best is None or score > best[0]:
-            best = (score, pair[1], pair[0], base)
+        partners = [e for e in found if e is not upper and _nested(e, upper)]
+        partners.append(concentric(drawing, upper, exclude=upper.points))
+        for partner in partners:
+            if partner is None:
+                continue
+            pair = sorted((upper, partner), key=lambda e: e.major)
+            below = [e for e in found if e is not upper and e is not partner
+                     and e.center[1] > upper.center[1] + 0.3 * upper.minor
+                     and np.linalg.norm(e.center - partner.center) > 0.2 * upper.minor]
+            if not below:
+                continue
+            base = max(below, key=lambda e: e.coverage)
+            score = upper.coverage + partner.coverage + base.coverage
+            if best is None or score > best[0]:
+                best = (score, pair[1], pair[0], base)
     return None if best is None else best[1:]
+
+
+def _without(e: Ellipse, lines: list[StraightLine]) -> Ellipse:
+    """L'ellipse sans les points des verticales ni de leur prolongement : au
+    bout de l'ellipse, une verticale qui la touche reste près d'elle sur
+    quelques mm et passerait pour une portion droite de l'ellipse."""
+    if not len(e.points):
+        return e
+    keep = np.ones(len(e.points), bool)
+    for line in lines:
+        rel = e.points - line.center
+        along = rel @ line.direction
+        across = np.abs(rel[:, 0] * line.direction[1] - rel[:, 1] * line.direction[0])
+        keep &= ~((across <= ON_LINE_MM) & (along >= line.t0 - LINE_EXTENSION_MM)
+                  & (along <= line.t1 + LINE_EXTENSION_MM))
+    return replace(e, points=e.points[keep])
+
+
+def _nested(inner: Ellipse, outer: Ellipse) -> bool:
+    """``inner`` est plus petite que ``outer`` et son centre est dedans."""
+    return bool(inner.major < outer.major and inner.minor < outer.minor
+                and outer.contains(inner.center[None])[0])
 
 
 def _tilt(e: Ellipse) -> float:
@@ -176,11 +207,11 @@ def _verticals(drawing: Drawing, ellipses: list[Ellipse], outer: Ellipse,
     """Ligne verticale gauche et droite entre l'ellipse externe et la base :
     points hors des ellipses, au tracé localement vertical, près des côtés de
     l'ellipse externe."""
-    points, tangents = drawing.points, _tangents(drawing)
+    points, directions = drawing.points, tangents(drawing)
     off = np.ones(len(points), bool)
     for e in ellipses:
         off &= e.distance(points) > ON_ELLIPSE_MM
-    upright = np.abs(tangents[:, 1]) >= np.cos(np.radians(VERTICAL_MAX_DEG))
+    upright = np.abs(directions[:, 1]) >= np.cos(np.radians(VERTICAL_MAX_DEG))
     between = (points[:, 1] > outer.center[1] - 0.2 * outer.minor) & (
         points[:, 1] < base.center[1] + 0.2 * base.minor)
     found = []
@@ -191,18 +222,6 @@ def _verticals(drawing: Drawing, ellipses: list[Ellipse], outer: Ellipse,
             chosen = points[near]
             found.append(StraightLine([chosen[np.argsort(chosen[:, 1])]], drawing.stroke_width))
     return found
-
-
-def _tangents(drawing: Drawing) -> np.ndarray:
-    """Direction locale du tracé en chaque point (sur ~2 mm)."""
-    found = []
-    for stroke in drawing.strokes:
-        pts = stroke.points
-        k = min(3, len(pts) - 1)
-        d = (np.vstack([pts[k:], np.repeat(pts[-1:], k, axis=0)])
-             - np.vstack([np.repeat(pts[:1], k, axis=0), pts[:-k]]))
-        found.append(d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9))
-    return np.vstack(found)
 
 
 def _reach(point: np.ndarray, ellipse: Ellipse) -> float:

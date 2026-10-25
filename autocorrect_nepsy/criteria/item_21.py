@@ -20,13 +20,16 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
+from . import polygons
 from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
-from .ellipses import Ellipse, crosses, find_ellipses
+from .ellipses import TOLERANCE_MM, Ellipse, coverage, crosses, find_ellipses, fit, tangents
 from .shapes import separate_extras
 
 CHORDS = 6
 MIN_WHEEL_MM = 15.0  # petit diamètre minimal d'une roue
-OTHER_WHEEL_COVERAGE = 0.8  # autre cercle bien tracé : roue en trop
+OTHER_WHEEL_COVERAGE = 0.8  # autre cercle (rapport ≤ 1,5) bien tracé : roue en trop
+RIM_NEAR_FRACTION = 0.25  # contour extérieur à moins de 25 % du rayon : la jante
+MIN_RIM_COVERAGE = 0.4  # part de la jante visible sur le contour extérieur
 HUB_FRACTION = 0.2  # rayons cherchés entre 20 % et 85 % de la distance à la jante
 RIM_FRACTION = 0.85
 TRACK_FROM_FRACTION = 0.15  # un rayon est suivi jusqu'à 15 % de la distance au moyeu
@@ -55,8 +58,8 @@ CIRCLE_RATIO = 1.3  # Global C
 DISTORTION_MAX_SPREAD = 0.08  # irrégularité du rayon d'une roue (bosses, angles)
 GAP_MM = 1.0  # Motricité B
 # La jante tracée à main levée s'écarte de l'ellipse ajustée : elle est
-# cherchée entre 75 % et 125 % de la distance du centre à l'ellipse.
-RIM_BAND = (0.75, 1.25)
+# cherchée entre 70 % et 140 % de la distance du centre à l'ellipse.
+RIM_BAND = (0.7, 1.4)
 AXIS_LOOSE_DEG = 10.0  # corde horizontale ou verticale « ou presque »
 SIZE_RATIO = (1.1, 1.4)  # Global D : roue gauche / roue droite
 LEFT_CHORD_MAX_MM = 58.0  # Local E
@@ -232,12 +235,37 @@ def _wheel_ellipses(drawing: Drawing) -> tuple[tuple[Ellipse, Ellipse], int] | N
             continue
         if len(wheels) < 2:
             wheels.append(e)
-        elif e.coverage >= OTHER_WHEEL_COVERAGE:
+        elif e.coverage >= OTHER_WHEEL_COVERAGE and e.ratio <= CIRCLE_LOOSE_RATIO:
             others += 1
     if len(wheels) < 2:
         return None
+    outline = polygons.silhouette(drawing)
+    for _ in range(3 if outline is not None else 0):  # jusqu'à ce que les jantes bougent peu
+        wheels = [_rim(drawing, outline, wheels[0], wheels[1]),
+                  _rim(drawing, outline, wheels[1], wheels[0])]
     left, right = sorted(wheels, key=lambda e: e.center[0])
     return (left, right), others
+
+
+def _rim(drawing: Drawing, outline: np.ndarray, wheel: Ellipse, other: Ellipse) -> Ellipse:
+    """Ellipse réajustée sur la jante visible de la roue : la partie du contour
+    extérieur du dessin qui la longe. Les rayons et l'autre roue, qui croisent
+    la jante, n'y entrent pas : une jante irrégulière est ainsi lue de la même
+    façon quels que soient les petits détails du tracé. Elle est ensuite
+    recalée sur le milieu du trait (le contour en longe le bord extérieur)."""
+    radius = (wheel.major + wheel.minor) / 4
+    near, near_other = wheel.distance(outline), other.distance(outline)
+    rim = outline[(near <= RIM_NEAR_FRACTION * radius) & (near < near_other)]
+    refit = fit(rim)
+    if refit is None or coverage(wheel, rim) < MIN_RIM_COVERAGE:
+        return wheel
+    points = drawing.points
+    centered = fit(points[refit.traced(points, tangents(drawing))])
+    if centered is not None and np.linalg.norm(centered.center - refit.center) < 0.1 * radius:
+        refit = centered
+    refit.points = points[refit.distance(points) <= TOLERANCE_MM]
+    refit.coverage = coverage(refit, refit.points)
+    return refit
 
 
 def _wheels(drawing: Drawing, left: Ellipse, right: Ellipse) -> tuple[Wheel, Wheel]:

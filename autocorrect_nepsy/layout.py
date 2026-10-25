@@ -37,6 +37,7 @@ HEADER_SEPARATOR_FRACTION = 0.78
 # distance (mm), en laissant une marge pour les ombres du bord du scan.
 OUTER_DRAWING_MM = 15.0
 PAGE_EDGE_MM = 3.0
+WORK_DPI = 200.0  # résolution de travail (voir work_resolution)
 
 
 class LayoutError(ValueError):
@@ -98,6 +99,7 @@ class PreparedPage:
     columns: list[tuple[int, int]]
     top: int
     bottom: int
+    scale: float = 1.0  # pixels de la page préparée par pixel du scan
 
     @property
     def has_header(self) -> bool:
@@ -137,15 +139,31 @@ class PreparedPage:
 
 
 def prepare_page(page: ScannedPage, ink: str = "bleu") -> PreparedPage:
-    """Redresse la page, l'oriente et repère les colonnes d'items."""
-    image, skew = deskew(page.image)
+    """Ramène la page à la résolution de travail, la redresse, l'oriente et
+    repère les colonnes d'items."""
+    image, scale = work_resolution(page)
+    image, skew = deskew(image)
     image, turns, separator = _orient(image, ink)
     columns, top, bottom = _columns(image, separator)
     if len(columns) not in (3, 4):
         raise LayoutError(f"{len(columns)} zones d'items trouvées : ce n'est pas une page du "
                           "cahier de Copie de figures, ou le scan est incomplet")
-    return PreparedPage(image, ink_mask(image, ink), page.px_per_mm, turns, skew,
-                        separator, columns, top, bottom)
+    return PreparedPage(image, ink_mask(image, ink), page.px_per_mm * scale, turns, skew,
+                        separator, columns, top, bottom, scale)
+
+
+def work_resolution(page: ScannedPage) -> tuple[np.ndarray, float]:
+    """Scan plus fin que 200 dpi réduit à 200 dpi, et facteur de réduction.
+
+    L'outil est réglé à 200 dpi : les traits (épaisseur en pixels, squelette,
+    petits nettoyages) sont ainsi lus de la même façon quelle que soit la
+    résolution du scan. Un scan plus fin n'apporterait rien de plus.
+    """
+    if page.dpi <= WORK_DPI * 1.02:
+        return page.image, 1.0
+    factor = WORK_DPI / page.dpi
+    image = cv2.resize(page.image, None, fx=factor, fy=factor, interpolation=cv2.INTER_AREA)
+    return image, image.shape[1] / page.image.shape[1]
 
 
 def analyse_page(page: ScannedPage, page_number: int, ink: str = "bleu") -> PageLayout:
