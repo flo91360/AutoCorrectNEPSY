@@ -123,7 +123,9 @@ jobs:
           Get-Content sortie\cotation.csv
           # Copies fidèles des modèles de la page 2 : 2 points par processus et par item.
           $rows = @(Import-Csv sortie\cotation.csv)
-          if (($rows.item -join ',') -ne '4,5,6,7') { throw "items inattendus : $($rows.item -join ',')" }
+          # ($rows.item désignerait la méthode Item du tableau, pas la colonne.)
+          $items = ($rows | Select-Object -ExpandProperty item) -join ','
+          if ($items -ne '4,5,6,7') { throw "items inattendus : $items" }
           foreach ($row in $rows) {
             foreach ($total in 'motricite_total', 'global_total', 'local_total') {
               if ($row.$total -ne '2') { throw "item $($row.item) : $total = $($row.$total), 2 attendu" }
