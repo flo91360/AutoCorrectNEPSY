@@ -21,12 +21,25 @@ except ImportError:
     pytest.skip("tkinter absent", allow_module_level=True)
 
 
+def new_root(attempts: int = 3) -> "tk.Tk":
+    """Fenêtre Tk. Sous Windows, la création échoue parfois au hasard après
+    d'autres fenêtres (« Can't find a usable init.tcl… No error ») : on réessaie
+    avant de conclure qu'il n'y a pas d'écran."""
+    for attempt in range(attempts):
+        try:
+            return tk.Tk()
+        except tk.TclError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.5)
+
+
 @pytest.fixture
 def app():
     from autocorrect_nepsy.gui import App
 
     try:
-        root = tk.Tk()
+        root = new_root()
     except tk.TclError:
         if REQUIRED:
             raise
