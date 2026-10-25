@@ -8,6 +8,7 @@ import numpy as np
 DPI = 200
 PX_PER_MM = DPI / 25.4
 BLUE_PEN = (200, 80, 30)  # BGR
+DARK_BLUE_PEN = (72, 60, 54)  # encre épaisse : bleu presque noir, peu saturé
 PRINT_BLACK = (30, 30, 30)
 PENCIL = (120, 120, 120)
 BACKGROUND = (235, 235, 235)
