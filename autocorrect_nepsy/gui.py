@@ -7,14 +7,16 @@ côté des scans.
 
 from __future__ import annotations
 
+import html
+import json
 import os
 import queue
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import traceback
-import webbrowser
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -114,16 +116,36 @@ def results_folder(first_scan: Path) -> Path:
     return Path.cwd() / name
 
 
-def open_path(path: Path, anchor: str = "") -> None:
-    """Ouvre un fichier ou un dossier avec l'application par défaut."""
-    if path.suffix == ".html":
-        webbrowser.open(path.resolve().as_uri() + anchor)
-    elif sys.platform.startswith("win"):
+def open_path(path: Path) -> None:
+    """Ouvre un fichier ou un dossier avec l'application par défaut du système.
+
+    Sous Windows, le chemin est passé tel quel. Une adresse « file:// » (espaces
+    et accents encodés, ancre « #item ») n'y est pas toujours ouverte, et le
+    module webbrowser ignore alors l'échec sans rien signaler.
+    """
+    if sys.platform.startswith("win"):
         os.startfile(path)  # type: ignore[attr-defined]
     elif sys.platform == "darwin":
         subprocess.Popen(["open", str(path)])
     else:
         subprocess.Popen(["xdg-open", str(path)])
+
+
+def item_page(report: Path, item: int) -> Path:
+    """Petite page relais qui ouvre le rapport directement sur un item : le
+    système sait ouvrir un fichier, mais pas à une ancre (« #item4 »)."""
+    folder = Path(tempfile.gettempdir()) / "AutoCorrectNEPSY"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = report.resolve().as_uri() + f"#item{item}"
+    page = folder / f"item-{item}.html"
+    page.write_text(
+        f'<!doctype html><html lang="fr"><head><meta charset="utf-8">'
+        f'<meta http-equiv="refresh" content="0; url={html.escape(target)}">'
+        f"<title>Item {item}</title></head><body>"
+        f"<script>location.replace({json.dumps(target)});</script>"
+        f'<p><a href="{html.escape(target)}">Ouvrir le rapport à l’item {item}</a></p>'
+        f"</body></html>", encoding="utf-8")
+    return page
 
 
 def thumbnail(row: ScanRow) -> Image.Image:
@@ -597,18 +619,35 @@ class App:
         messagebox.showerror(APP_NAME, f"Une erreur est survenue :\n\n{error}{where}")
 
     # -- résultats ------------------------------------------------------------
+    def _open(self, path: Path) -> None:
+        try:
+            open_path(path)
+        except OSError as error:
+            messagebox.showerror(APP_NAME, "Impossible d'ouvrir automatiquement :\n"
+                                 f"{path}\n\nOuvrez-le depuis l'explorateur de fichiers.\n\n({error})")
+
     def open_report(self) -> None:
         if self.output:
-            open_path(self.output / "rapport.html")
+            self._open(self.output / "rapport.html")
 
-    def open_item_report(self, _event=None) -> None:
-        selection = self.tree.selection()
-        if self.output and selection and selection[0] != "total":
-            open_path(self.output / "rapport.html", f"#item{selection[0]}")
+    def open_item_report(self, event=None) -> None:
+        if not self.output:
+            return
+        # La ligne sous la souris, sinon la ligne sélectionnée.
+        row = self.tree.identify_row(event.y) if event is not None else ""
+        row = row or next(iter(self.tree.selection()), "")
+        if not row.isdigit():
+            return
+        report = self.output / "rapport.html"
+        try:
+            page = item_page(report, int(row))
+        except OSError:
+            page = report  # dossier temporaire inaccessible : rapport en entier
+        self._open(page)
 
     def open_folder(self) -> None:
         if self.output:
-            open_path(self.output)
+            self._open(self.output)
 
     def compare(self) -> None:
         if not self.output:
