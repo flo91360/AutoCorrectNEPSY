@@ -6,6 +6,13 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.9.0] - 2026-10-25
+
+- Coins arrondis reconnus comme des coins (carré de 4 cm aux coins jusqu'à 6 mm de rayon environ, rectangle de l'item 11) sans découper les lignes ondulées ni les cercles
+- Items 1 et 2 : le trait est mesuré en entier (zigzag, ondulation, crochet compris) et un trait brisé ou en plus est signalé « à vérifier »
+- Un trait de crayon de l'ergothérapeute qui coupe le tracé de l'enfant ne le coupe plus en deux éléments
+- Versions exactes des dépendances de l'exécutable et des tests sous Python 3.12 (packaging/contraintes.txt) ; tests de chaque seuil sensible de part et d'autre
+
 ## [0.8.0] - 2026-10-25
 
 - Items signalés « à vérifier » quand la figure du modèle n'est pas retrouvée (coins arrondis, dessin mal lu), quand la page du cahier est devinée sans certitude (page manquante, scan seul) ou quand l'échelle du scan est douteuse ; en ligne de commande, --pages est demandé si le numéro de page est incertain

@@ -7,9 +7,9 @@ from autocorrect_nepsy.criteria import item_10, score_item
 from autocorrect_nepsy.ink import ink_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
-from synth import (PX_PER_MM, bucket, canvas, circle_points, cross_points, cylinder, dot, dot_row,
-                   draw_model, flower, nested_triangles, polyline, rounded_rectangle, s_curve,
-                   stairs_points, v_shape, wheels, zigzag)
+from synth import (PENCIL, PX_PER_MM, bucket, canvas, circle_points, cross_points, cylinder, dot,
+                   dot_row, draw_model, flower, nested_triangles, polyline, rounded_rectangle,
+                   s_curve, stairs_points, v_shape, wheels, zigzag)
 
 
 def score(item, image):
@@ -479,18 +479,39 @@ def test_unrecognized_figure_asks_review(item):
     assert any("l'outil a pu mal lire le dessin" in note for note in result.notes)
 
 
-def test_item4_rounded_corners_are_not_dropped_silently():
-    # Coins arrondis de 4 mm : le carré n'est pas reconnu, il doit être signalé.
-    result = score(4, polyline(canvas(), rounded_rectangle(12, 24, 52, 64, 4.0), closed=True))
+@pytest.mark.parametrize("radius", [1.5, 4.0, 6.0])
+def test_item4_rounded_corners_are_still_corners(radius):
+    # Carré tracé d'un seul geste, aux coins arrondis : ses quatre côtés sont retrouvés.
+    result = score(4, polyline(canvas(), rounded_rectangle(12, 24, 52, 64, radius), closed=True))
+    assert set(scores(result).values()) == {1}, {c: k.details for c, k in result.criteria.items()}
+
+
+def test_item4_very_rounded_square_is_not_dropped_silently():
+    # Coins de 10 mm de rayon : plus de côtés droits nets, le carré n'est pas
+    # reconnu, mais l'item est signalé.
+    result = score(4, polyline(canvas(), rounded_rectangle(12, 24, 52, 64, 10.0), closed=True))
     assert result.to_review
-    slightly = score(4, polyline(canvas(), rounded_rectangle(12, 24, 52, 64, 1.5), closed=True))
-    assert set(scores(slightly).values()) == {1}
 
 
-def test_item1_zigzag_and_extra_line_ask_review():
-    # Seule la plus longue ligne est notée : un trait en zigzag ou un trait en trop
-    # ne doit pas passer sans vérification.
-    assert score(1, polyline(canvas(), zigzag(32, 24, 64, 3.0))).to_review
+def test_item11_rounded_rectangle_is_recognized():
+    image = polyline(canvas(), rounded_rectangle(4, 24, 60, 64, 5.0), closed=True)
+    polyline(image, [(4, 43), (24, 43), (24, 24)], seed=1)
+    assert set(scores(score(11, image)).values()) == {1}
+
+
+def test_item1_zigzag_is_measured_whole_and_asks_review():
+    # Le trait est mesuré en entier : un zigzag de ± 3 mm sur 4 cm est assez long
+    # et assez vertical, mais ne tient pas dans la barre grisée de 5 mm.
+    result = score(1, polyline(canvas(), zigzag(32, 24, 64, 3.0)))
+    assert scores(result) == {"G": 1, "A": 1, "B": 0, "C": 1, "D": 1}
+    assert result.to_review
+    # Un trait interrompu dans l'axe compte en entier.
+    image = polyline(canvas(), [(32, 24), (32, 40)])
+    polyline(image, [(32, 44), (32, 64)], seed=1)
+    assert scores(score(1, image))["D"] == 1
+
+
+def test_item1_extra_line_asks_review():
     image = polyline(canvas(), [(32, 24), (32, 64)])
     polyline(image, [(10, 75), (40, 75)], seed=1)
     assert score(1, image).to_review
@@ -503,3 +524,94 @@ def test_item20_unexpected_petal_count_asks_review():
     assert result.to_review
     assert any("7 pétale(s) lu(s) au lieu de 6" in note for note in result.notes)
     assert not any("pétale(s) lu(s)" in note for note in score(20, flower_image()).notes)
+
+
+@pytest.mark.parametrize("item", [4, 6, 8, 10, 12, 14, 19, 21])
+def test_pencil_crossing_the_drawing_is_ignored(item):
+    # Traits de crayon de l'ergothérapeute qui coupent le tracé de l'enfant : le
+    # tracé n'est ni interrompu ni séparé en éléments en trop.
+    image = draw_model(item, canvas())
+    polyline(image, [(5, 15), (60, 80)], color=PENCIL, width_mm=0.5)
+    polyline(image, [(35.5, 5), (35.5, 85)], color=PENCIL, width_mm=0.5)
+    result = score(item, image)
+    assert set(scores(result).values()) == {1}, {c: k.details for c, k in result.criteria.items()}
+
+
+# -- seuils de part et d'autre ---------------------------------------------------
+# Un dessin juste en deçà et un juste au-delà de chaque seuil : un seuil modifié
+# par erreur fait échouer l'un des deux.
+
+def arc(sagitta, top=24.0, bottom=64.0, x=32.0):
+    """Trait vertical arqué, de flèche ``sagitta`` (mm)."""
+    y = np.linspace(top, bottom, 200)
+    middle, half = (top + bottom) / 2, (bottom - top) / 2
+    return np.column_stack([x + sagitta * (1 - ((y - middle) / half) ** 2), y])
+
+
+def test_item1_grey_bar_of_5_mm():
+    inside = score(1, polyline(canvas(), arc(3.5)))  # bande de 4,4 mm
+    outside = score(1, polyline(canvas(), arc(4.4)))  # bande de 5,3 mm
+    assert inside.criteria["B"].met and not outside.criteria["B"].met
+    assert outside.criteria["B"].borderline and outside.to_review
+
+
+@pytest.mark.parametrize("overshoots, motor_b", [(1, 1), (2, 0)])
+def test_item4_two_overshoots_of_more_than_5_mm_fail_motricite_b(overshoots, motor_b):
+    image = polyline(canvas(), [(5.5, 24), (52, 24)])  # dépasse de 6,5 mm le coin haut-gauche
+    polyline(image, [(52, 24), (52, 64)], seed=1)
+    polyline(image, [(12, 64), (58.5 if overshoots == 2 else 52, 64)], seed=2)
+    polyline(image, [(12, 24), (12, 64)], seed=3)
+    assert scores(score(4, image))["B"] == motor_b
+
+
+@pytest.mark.parametrize("slope, general", [(73, 1), (77, 0)])
+def test_item6_branches_at_most_75_degrees_from_horizontal(slope, general):
+    apex = np.array([32.0, 70.0])
+    left = apex + 40 * np.array([-np.cos(np.radians(60)), -np.sin(np.radians(60))])
+    right = apex + 40 * np.array([np.cos(np.radians(slope)), -np.sin(np.radians(slope))])
+    assert scores(score(6, polyline(canvas(), [left, apex, right])))["G"] == general
+
+
+def test_failed_borderline_measure_is_flagged():
+    # Angle au sommet de 81° : Global D échoue de peu, à vérifier.
+    half = np.radians(81.0 / 2)
+    left = (32 - 40 * np.sin(half), 70 - 40 * np.cos(half))
+    right = (32 + 40 * np.sin(half), 70 - 40 * np.cos(half))
+    result = score(6, polyline(canvas(), [left, (32, 70), right]))
+    assert not result.criteria["D"].met and result.criteria["D"].borderline
+
+
+@pytest.mark.parametrize("size, local_f", [(14.0, 0), (17.0, 1)])
+def test_item13_radial_lines_of_at_least_15_mm(size, local_f):
+    # Les lignes radiales lues sont plus courtes de ~1,7 mm (tache d'encre au centre).
+    result = scores(score(13, fan([(a, size) for a in np.arange(22.5, 180, 22.5)])))
+    assert result["F"] == local_f
+
+
+@pytest.mark.parametrize("width, global_d", [(57.0, 1), (59.0, 0)])
+def test_item17_outer_lines_more_than_45_degrees(width, global_d):
+    # Lignes extérieures à 46° (largeur 57 mm) et 44° (largeur 59 mm).
+    image = canvas(width_mm=80)
+    for i, points in enumerate(v_shape((40, 57), height=20, width=width)):
+        polyline(image, points, closed=True, seed=i)
+    assert scores(score(17, image))["D"] == global_d
+
+
+@pytest.mark.parametrize("tilt, global_d", [(4.4, 1), (5.3, 0)])
+def test_item19_ellipse_axes_within_5_degrees(tilt, global_d):
+    a = np.radians(tilt)
+    rotation = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+    center = np.array([32.0, 42.0])
+    image = canvas()
+    for i, (points, closed) in enumerate(bucket((32, 30))):
+        polyline(image, (np.asarray(points, float) - center) @ rotation.T + center,
+                 closed=closed, seed=i)
+    assert scores(score(19, image))["D"] == global_d
+
+
+def test_item21_wheels_of_at_least_15_mm():
+    # Roues de 20 et 16,8 mm : reconnues ; de 18 et 14 mm : la petite est trop petite.
+    small = wheels_image(wheels(left_center=(26, 50), left=10.0, right=8.4, offset=(7, -7)))
+    assert not any("roues non reconnues" in note for note in score(21, small).notes)
+    tiny = wheels_image(wheels(left_center=(26, 50), left=9.0, right=7.0, offset=(7, -7)))
+    assert any("roues non reconnues" in note for note in score(21, tiny).notes)
