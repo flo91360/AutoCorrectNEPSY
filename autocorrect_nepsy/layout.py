@@ -11,7 +11,7 @@ avec le tracé de l'enfant en dessous (ou, page vierge, les modèles au-dessus).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -100,6 +100,8 @@ class PreparedPage:
     top: int
     bottom: int
     scale: float = 1.0  # pixels de la page préparée par pixel du scan
+    # Note des modèles imprimés pour chaque numéro de page (voir identify.py).
+    model_scores: dict[int, float] = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def has_header(self) -> bool:
@@ -205,6 +207,20 @@ def uncertain_guesses(pages: list[PreparedPage],
     ``fixed`` donne les numéros choisis à la main (index -> numéro), sûrs.
     """
     fixed = fixed or {}
+    possible = possible_numbers(pages, fixed)
+    unsure = [index for index in range(len(pages)) if index not in fixed]
+    if pages and not possible[0]:
+        # Aucune suite dans l'ordre du cahier : scans en désordre ou en double.
+        return set(unsure)
+    return {index for index in unsure if len(possible[index]) > 1}
+
+
+def possible_numbers(pages: list[PreparedPage],
+                     fixed: dict[int, int] | None = None) -> list[set[int]]:
+    """Numéros de page possibles de chaque scan, dans les suites de pages dans
+    l'ordre du cahier compatibles avec la structure des scans (ensembles vides
+    s'il n'y en a aucune)."""
+    fixed = fixed or {}
     options = [[fixed[index]] if index in fixed else page.compatible_pages() or list(ITEMS_BY_PAGE)
                for index, page in enumerate(pages)]
     possible: list[set[int]] = [set() for _ in pages]
@@ -219,11 +235,7 @@ def uncertain_guesses(pages: list[PreparedPage],
                 follow(index + 1, number, chosen + [number])
 
     follow(0, 0, [])
-    unsure = [index for index in range(len(pages)) if index not in fixed]
-    if pages and not possible[0]:
-        # Aucune suite dans l'ordre du cahier : scans en désordre ou en double.
-        return set(unsure)
-    return {index for index in unsure if len(possible[index]) > 1}
+    return possible
 
 
 def deskew(image: np.ndarray) -> tuple[np.ndarray, float]:

@@ -14,10 +14,10 @@ HEADER = "item,general,motricite_A,motricite_B,global_C,global_D,local_E,local_F
 FULL = ["4,1,1,1,1,1,1,1\n", "5,1,1,1,1,1,1,1\n", "6,1,1,1,1,1,1,1\n", "7,1,1,1,1,1,1,1\n"]
 
 
-def protocol(corpus, name, rows, pages="2"):
+def protocol(corpus, name, rows, pages="2", models=True):
     folder = corpus / name
     folder.mkdir()
-    rgb = cv2.cvtColor(page({0: 4, 1: 5, 2: 6, 3: 7}), cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(page({0: 4, 1: 5, 2: 6, 3: 7}, models=models), cv2.COLOR_BGR2RGB)
     Image.fromarray(rgb).save(folder / "scan.pdf", "PDF", resolution=DPI)
     (folder / validation.REFERENCE_NAME).write_text(HEADER + "".join(rows), encoding="utf-8")
     if pages:
@@ -30,8 +30,9 @@ def corpus(tmp_path_factory):
     protocol(root, "P001", FULL)
     # L'ergothérapeute retire deux points à l'item 5 : deux désaccords, non signalés.
     protocol(root, "P002", [FULL[0], "5,1,0,1,1,0,1,1\n", FULL[2], FULL[3]])
-    # Scan seul sans pages.txt : numéro de page incertain, protocole écarté.
-    protocol(root, "P003", FULL, pages=None)
+    # Scan seul sans pages.txt ni modèles lisibles : numéro de page incertain,
+    # protocole écarté.
+    protocol(root, "P003", FULL, pages=None, models=False)
     (root / "notes").mkdir()  # dossier sans cotation de l'ergothérapeute : ignoré
     return root
 

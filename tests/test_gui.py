@@ -157,10 +157,20 @@ def test_wrong_page_and_resolution_are_flagged(app, scan):
     assert str(app.run_button.cget("state")) == "disabled"
 
 
-def test_guessed_page_of_a_lone_scan_is_to_confirm(app, scan):
+def test_lone_scan_page_is_read_on_its_printed_models(app, scan):
+    app.add_paths([scan])
+    wait(app, lambda: app.rows and not app.busy)
+    [row] = app.rows
+    assert row.number() == 2 and not row.guessed_page
+
+
+def test_guessed_page_of_a_lone_scan_is_to_confirm(app, tmp_path):
     from autocorrect_nepsy.pipeline import page_label
 
-    # Un scan seul à quatre items peut être la page 2, 3 ou 4 du cahier.
+    # Un scan seul à quatre items, sans modèles lisibles : page 2, 3 ou 4 du cahier.
+    scan = tmp_path / "sans modeles.pdf"
+    rgb = cv2.cvtColor(page({0: 4, 1: 5, 2: 6, 3: 7}, models=False), cv2.COLOR_BGR2RGB)
+    Image.fromarray(rgb).rotate(90, expand=True).save(scan, "PDF", resolution=100)
     app.add_paths([scan])
     wait(app, lambda: app.rows and not app.busy)
     [row] = app.rows

@@ -29,8 +29,8 @@ from . import __version__
 from .compare import format_comparison, pair_scores, read_flags, read_scores
 from .criteria import SUPPORTED_ITEMS
 from .ink import INK_HUES
-from .layout import (ITEMS_BY_PAGE, LayoutError, PreparedPage, guess_page_numbers, prepare_page,
-                     uncertain_guesses)
+from .identify import resolve
+from .layout import ITEMS_BY_PAGE, LayoutError, PreparedPage, prepare_page
 from .pipeline import Correction, PageInput, correct_pages, page_label
 from .report import save_results, score_row, totals
 from .scan import ScannedPage, load_pages, natural_key
@@ -365,6 +365,7 @@ class App:
     def add_paths(self, paths: list[Path]) -> None:
         paths = sorted(paths, key=natural_key)
         ink = self.ink_var.get()
+        existing, fixed = self._ready_pages()
 
         def task():
             loaded = []
@@ -380,6 +381,9 @@ class App:
                         loaded.append((path, scan, prepare_page(scan, ink), None))
                     except LayoutError as error:
                         loaded.append((path, scan, None, str(error)))
+            # Modèles imprimés lus ici, hors de la fenêtre : c'est un peu long.
+            self.worker.post(self._progress, (len(paths), len(paths), "Lecture des modèles…"))
+            resolve(existing + [prepared for _, _, prepared, _ in loaded if prepared], fixed)
             return loaded
 
         self._set_busy(True, "Analyse des scans…")
@@ -414,6 +418,7 @@ class App:
             return
         ink = self.ink_var.get()
         rows = list(self.rows)
+        manual = {id(row): row.number() for row in rows if row.manual_page and row.number()}
 
         def task():
             results = []
@@ -423,6 +428,9 @@ class App:
                     results.append((prepare_page(row.scan, ink), None))
                 except LayoutError as error:
                     results.append((None, str(error)))
+            ready = [(row, prepared) for row, (prepared, _) in zip(rows, results) if prepared]
+            resolve([prepared for _, prepared in ready],
+                    {i: manual[id(row)] for i, (row, _) in enumerate(ready) if id(row) in manual})
             return results
 
         def done(results) -> None:
@@ -436,12 +444,17 @@ class App:
         self._set_busy(True, "Nouvelle analyse avec la couleur choisie…")
         self.worker.run(task, done, self._failed)
 
-    def _refresh_guesses(self) -> None:
+    def _ready_pages(self) -> tuple[list[PreparedPage], dict[int, int]]:
+        """Pages préparées des scans lisibles et numéros choisis à la main."""
         ready = [row for row in self.rows if row.prepared]
         fixed = {i: row.number() for i, row in enumerate(ready) if row.manual_page and row.number()}
-        prepared = [r.prepared for r in ready]
-        unsure = uncertain_guesses(prepared, fixed)
-        for index, (row, number) in enumerate(zip(ready, guess_page_numbers(prepared, fixed))):
+        return [row.prepared for row in ready], fixed
+
+    def _refresh_guesses(self) -> None:
+        ready = [row for row in self.rows if row.prepared]
+        prepared, fixed = self._ready_pages()
+        numbers, unsure = resolve(prepared, fixed)
+        for index, (row, number) in enumerate(zip(ready, numbers)):
             row.guessed_page = index in unsure
             if not row.manual_page:
                 if row.page_var is None:

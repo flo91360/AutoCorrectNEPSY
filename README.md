@@ -29,10 +29,10 @@ cotation que l'ergothérapeute valide.
    **Exécuter quand même**.
 3. Dans la fenêtre :
    - **Ajouter des scans…** : choisissez les pages scannées du cahier ;
-   - vérifiez pour chaque scan la **page du cahier** proposée (devinée
-     automatiquement ; « à confirmer » quand une page manque ou pour un scan
-     seul : choisissez-la alors dans la liste) et sa **résolution** en dpi
-     (lue dans le fichier, modifiable) ;
+   - vérifiez pour chaque scan la **page du cahier** proposée (déduite de la
+     structure de la page et de ses modèles imprimés ; « à confirmer » quand
+     elle reste incertaine : choisissez-la alors dans la liste) et sa
+     **résolution** en dpi (lue dans le fichier, modifiable) ;
    - cliquez sur **Lancer la correction automatique**.
 4. Les notes s'affichent, les items à vérifier sont surlignés. Le rapport
    détaillé et le tableau des notes sont enregistrés dans un dossier
@@ -72,11 +72,14 @@ autocorrect-nepsy corriger page1.pdf page2.pdf page3.pdf -o correction/
 Options :
 
 - `--pages 1,2,3` : numéro de page du cahier de chaque page scannée, dans
-  l'ordre. Sans cette option, il est déduit des scans (la page 1 a un
-  en-tête, les pages 2 à 4 ont quatre items, les pages 5 et 6 trois), en
-  supposant les scans dans l'ordre du cahier. Ce n'est possible que si le
-  numéro est sûr : quand une page manque (les pages 2 à 4, comme 5 et 6, se
-  ressemblent) ou pour un scan seul, la commande s'arrête et demande `--pages`.
+  l'ordre. Sans cette option, il est déduit de la structure des scans (la
+  page 1 a un en-tête, les pages 2 à 4 ont quatre items, les pages 5 et 6
+  trois), dans l'ordre du cahier. Quand cela ne suffit pas (page manquante,
+  scan seul, scans dans le désordre), les modèles imprimés en haut de la page
+  départagent : ils sont notés avec les critères des items de chaque page
+  possible. Si les modèles ne sont pas lisibles, la commande s'arrête et
+  demande `--pages`. Une page dont les modèles ressemblent nettement à ceux
+  d'une autre page est signalée « à vérifier ».
 - `--dpi 300` : impose la résolution si celle du fichier est fausse.
 - `--encre rouge` : couleur du stylo de l'enfant (bleu par défaut).
 
@@ -146,7 +149,8 @@ Pour ne pas régler l'outil sur ses propres données de validation :
    pour mesurer en mm réels.
 2. **Mise en page** (`layout.py`) : redressement, choix du sens (modèles en
    haut, copies de l'enfant en bas), découpage des zones d'items à partir des
-   traits imprimés du cahier.
+   traits imprimés du cahier. Le numéro de page est déduit de la structure de
+   la page et, si besoin, de ses modèles imprimés (`identify.py`).
 3. **Encres** (`ink.py`) : le stylo de l'enfant est séparé de l'impression et
    du crayon de l'ergothérapeute par la couleur.
 4. **Traits** (`strokes.py`) : squelette du tracé, graphe des croisements,

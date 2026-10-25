@@ -9,8 +9,8 @@ from typing import Callable
 import numpy as np
 
 from .criteria import SUPPORTED_ITEMS, ItemResult, score_item
-from .layout import (ITEMS_BY_PAGE, PreparedPage, guess_page_numbers, prepare_page,
-                     uncertain_guesses)
+from .identify import better_page, resolve
+from .layout import ITEMS_BY_PAGE, PreparedPage, prepare_page
 from .scan import MM_PAR_POUCE, ScannedPage, load_pages
 from .strokes import Drawing, extract_drawing
 
@@ -47,7 +47,7 @@ class PageInput:
     scan: ScannedPage
     number: int
     prepared: PreparedPage | None = None  # déjà redressée et orientée (même encre)
-    guessed: bool = False  # numéro deviné sans certitude (voir uncertain_guesses)
+    guessed: bool = False  # numéro deviné sans certitude (voir identify.resolve)
 
 
 def page_label(number: int) -> str:
@@ -72,6 +72,10 @@ def correct_pages(inputs: list[PageInput], ink: str = "bleu",
         if page.guessed:
             doubts.append(f"page du cahier devinée ({page_label(page.number)}), à confirmer : "
                           "une page manquante ou un scan seul rend le numéro incertain")
+        other = better_page(prepared, page.number)
+        if other is not None:
+            doubts.append(f"les modèles imprimés ressemblent plutôt à la {page_label(other)} : "
+                          "vérifier le numéro de page")
         separator_mm = layout.separator.length / layout.px_per_mm
         expected = SEPARATOR_MM.get(page.number, SEPARATOR_DEFAULT_MM)
         if abs(separator_mm - expected) > SEPARATOR_TOLERANCE * expected:
@@ -99,13 +103,12 @@ def correct(files: list[str | Path], pages: list[int] | None = None, ink: str = 
     """Corrige des fichiers scannés.
 
     ``pages`` donne le numéro de page du cahier (1 à 6) de chaque page scannée,
-    dans l'ordre ; à défaut, il est déduit de la structure des pages, à condition
-    qu'il soit sûr (voir ``uncertain_guesses``).
+    dans l'ordre ; à défaut, il est déduit de la structure des pages et de leurs
+    modèles imprimés, à condition qu'il soit sûr (voir ``identify.resolve``).
     """
     scanned = [page for path in files for page in load_pages(path, dpi)]
     prepared = [prepare_page(page, ink) for page in scanned]
-    numbers = pages or guess_page_numbers(prepared)
-    unsure = set() if pages else uncertain_guesses(prepared)
+    numbers, unsure = (pages, set()) if pages else resolve(prepared)
     if unsure:
         sources = ", ".join(scanned[index].source for index in sorted(unsure))
         raise ValueError(f"numéro de page du cahier incertain pour {sources} (page manquante ou "
