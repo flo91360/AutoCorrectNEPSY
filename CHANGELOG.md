@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.6.0] - 2026-10-25
+
+- Correction des items 16 à 18 (triangles imbriqués, figure en V, escalier) à partir des régions fermées du dessin
+
 ## [0.5.0] - 2026-10-25
 
 - Correction des items 12 à 15 (deux lignes en S, éventail, cylindre, croix) ; le rapport montre les lignes reconstituées par l'outil

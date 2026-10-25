@@ -11,21 +11,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import cv2
 import numpy as np
 
 from .. import geometry as geo
 from ..strokes import STEP_MM, Drawing
 from . import marks as mk
 from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
-from .shapes import EXTRA_ELEMENT_MM, closed_outline
+from .polygons import EDGE_OFFSET_MM, Polygon, polygon, silhouette, simplify, turn
+from .shapes import EXTRA_ELEMENT_MM
 
 POLYGON_EPSILONS_MM = (1.0, 1.4, 1.8, 2.4, 3.0)  # simplification du contour
 WOBBLE_MM = 0.8  # amplitude d'une ondulation de la main (Motricité A)
 MOTOR_MAX_CHANGES = 3  # Motricité A, par ligne
-ROUNDED_MM = 1.5  # Motricité B : coin arrondi (contour loin du coin des deux côtés)
-SIDE_TRIM_MM = 1.5  # bouts d'un côté écartés pour ajuster sa droite
-MAX_CORNER_SHIFT_MM = 6.0  # coin recalculé trop loin du contour : on garde le sommet
 GENERAL_MAX_RATIO = 1.5  # largeurs et longueurs des branches
 PARALLEL_MAX_DEG = 15.0  # branches opposées dans le prolongement l'une de l'autre…
 OFFSET_MAX_FRACTION = 0.5  # … sans décalage de plus de la moitié de leur largeur
@@ -82,18 +79,15 @@ def score(drawing: Drawing, item: int = 15) -> ItemResult:
     def result() -> ItemResult:
         return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
 
-    outline = closed_outline(drawing)
-    polygon = None if outline is None else _cross_polygon(outline)
-    if polygon is None:
+    outline = silhouette(drawing)
+    found = None if outline is None else _cross_polygon(outline)
+    if found is None:
         reason = "croix à deux dimensions non reconnue (contour à 12 côtés attendu)"
         for code in codes:
             checks[code].fail(reason)
         return result()
-    corners, concave = polygon
-    sides = [outline[a:b + 1] if a < b else np.vstack([outline[a:], outline[:b + 1]])
-             for a, b in zip(corners, np.roll(corners, -1))]
-    side_lines = _side_lines(sides, outline[corners])
-    vertices = _refined_corners(side_lines, outline[corners])
+    poly, concave = found
+    vertices = poly.vertices
     branches = _branches(vertices, concave)
     by_name = {b.name: b for b in branches}
     if len(by_name) < 4:
@@ -127,11 +121,12 @@ def score(drawing: Drawing, item: int = 15) -> ItemResult:
     marks.append(mk.segment(left.end_middle, right.end_middle, f"largeur {fmt(span)}"))
     marks.append(mk.point(center, "centre"))
 
-    rounded = _rounded_corners(sides, vertices)
+    rounded = poly.rounded()
     for i, gap in rounded:
         marks.append(mk.point(vertices[i], f"coin arrondi {fmt(gap)}"))
 
-    for k, pts in enumerate(sides):
+    for k in range(len(vertices)):
+        pts = poly.core(k)
         changes = geo.count_direction_changes(pts, WOBBLE_MM) if len(pts) >= 3 else 0
         length = float(np.linalg.norm(vertices[(k + 1) % 12] - vertices[k]))
         checks["A"].add(changes <= MOTOR_MAX_CHANGES, f"côté de {fmt(length)} : {changes} "
@@ -191,37 +186,22 @@ def score(drawing: Drawing, item: int = 15) -> ItemResult:
     return result()
 
 
-def _cross_polygon(outline: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
-    """Sommets d'un polygone à 12 côtés qui suit le contour (indices dans le
-    contour, parcouru dans le sens des aiguilles d'une montre à l'écran) et
-    rangs de ses 4 coins rentrants parmi eux, ou None."""
-    contour = outline.astype(np.float32).reshape(-1, 1, 2)
+def _cross_polygon(outline: np.ndarray) -> tuple[Polygon, np.ndarray] | None:
+    """Polygone à 12 côtés qui suit le contour et rangs de ses 4 coins
+    rentrants, ou None."""
     for epsilon in POLYGON_EPSILONS_MM:
-        poly = cv2.approxPolyDP(contour, epsilon, True).reshape(-1, 2).astype(float)
-        if len(poly) != 12:
+        corners = simplify(outline, epsilon)
+        if len(corners) != 12:
             continue
-        corners = np.array([int(np.argmin(np.linalg.norm(outline - v, axis=1))) for v in poly])
-        order = np.argsort(corners)
-        corners, poly = corners[order], poly[order]
-        concave = np.array([_turn(poly, i) < 0 for i in range(12)])
+        raw = outline[corners]
+        concave = np.array([turn(raw, i) < 0 for i in range(12)])
         if concave.sum() != 4:
             continue
         index = np.flatnonzero(concave)
         if not np.all(np.diff(np.append(index, index[0] + 12)) == 3):
             continue
-        return corners, index
+        return polygon(outline, corners, -EDGE_OFFSET_MM), index
     return None
-
-
-def _signed_area(poly: np.ndarray) -> float:
-    x, y = poly[:, 0], poly[:, 1]
-    return float(np.dot(x, np.roll(y, -1)) - np.dot(np.roll(x, -1), y)) / 2
-
-
-def _turn(poly: np.ndarray, i: int) -> float:
-    a, b, c = poly[i - 1], poly[i], poly[(i + 1) % len(poly)]
-    u, v = b - a, c - b
-    return float(u[0] * v[1] - u[1] * v[0])
 
 
 def _branches(vertices: np.ndarray, concave: np.ndarray) -> list[Branch]:
@@ -238,40 +218,6 @@ def _branches(vertices: np.ndarray, concave: np.ndarray) -> list[Branch]:
         branch.name = names[quarter]
         branches.append(branch)
     return branches
-
-
-def _side_lines(sides: list[np.ndarray], vertices: np.ndarray) -> list[tuple]:
-    """Droite (point, direction) ajustée sur chaque côté, sans ses bouts."""
-    lines = []
-    for k, pts in enumerate(sides):
-        a, b = vertices[k], vertices[(k + 1) % len(vertices)]
-        keep = np.minimum(np.linalg.norm(pts - a, axis=1), np.linalg.norm(pts - b, axis=1))
-        core = pts[keep > SIDE_TRIM_MM]
-        lines.append(geo.principal_axis(core if len(core) >= 3 else np.array([a, b])))
-    return lines
-
-
-def _refined_corners(lines: list[tuple], vertices: np.ndarray) -> np.ndarray:
-    """Coins à la rencontre des droites de deux côtés consécutifs (un coin
-    arrondi ne raccourcit pas les côtés)."""
-    refined = vertices.copy()
-    for k in range(len(vertices)):
-        (c1, d1), (c2, d2) = lines[k - 1], lines[k]
-        corner = geo.line_intersection(c1, d1, c2, d2)
-        if corner is not None and np.linalg.norm(corner - vertices[k]) <= MAX_CORNER_SHIFT_MM:
-            refined[k] = corner
-    return refined
-
-
-def _rounded_corners(sides: list[np.ndarray], vertices: np.ndarray) -> list[tuple[int, float]]:
-    """Coins où le contour passe loin du point de rencontre des deux côtés."""
-    found = []
-    for k in range(len(vertices)):
-        nearest = float(np.sqrt(((np.vstack([sides[k - 1], sides[k]]) - vertices[k]) ** 2)
-                                .sum(-1)).min())
-        if nearest > ROUNDED_MM:
-            found.append((k, nearest))
-    return found
 
 
 def _offset(first: Branch, second: Branch) -> float:

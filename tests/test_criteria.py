@@ -8,7 +8,7 @@ from autocorrect_nepsy.ink import ink_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
 from synth import (PX_PER_MM, canvas, circle_points, cross_points, cylinder, dot, dot_row,
-                   draw_model, polyline, s_curve)
+                   draw_model, nested_triangles, polyline, s_curve, stairs_points, v_shape)
 
 
 def score(item, image):
@@ -19,7 +19,7 @@ def scores(result):
     return {code: c.score for code, c in result.criteria.items()}
 
 
-@pytest.mark.parametrize("item", range(1, 16))
+@pytest.mark.parametrize("item", range(1, 19))
 @pytest.mark.parametrize("wobble", [0.0, 0.5])
 def test_faithful_copy_gets_full_marks(item, wobble):
     result = score(item, draw_model(item, canvas(), wobble=wobble))
@@ -29,7 +29,8 @@ def test_faithful_copy_gets_full_marks(item, wobble):
 @pytest.mark.parametrize("item, codes", [(1, "GABCD"), (4, "GABCDEF"), (8, "GABCDEF"),
                                          (9, "GABCDEF"), (10, "GABCDEF"), (11, "GABCDEF"),
                                          (12, "GABCDEF"), (13, "GABCDEF"), (14, "GABCDEF"),
-                                         (15, "GABCDEF")])
+                                         (15, "GABCDEF"), (16, "GABCDEF"), (17, "GABCDEF"),
+                                         (18, "GABCDEF")])
 def test_empty_zone_scores_zero_and_asks_review(item, codes):
     result = score(item, canvas())
     assert scores(result) == {c: 0 for c in codes}
@@ -311,6 +312,60 @@ def test_item15_uneven_branches():
     wide = polyline(canvas(), cross_points((32, 44), half_width=9, arm=8), closed=True)
     result = scores(score(15, wide))
     assert result["E"] == 0 and result["C"] == 1 and result["D"] == 1
+
+
+def test_item16_missing_small_triangle_and_links():
+    parts = nested_triangles((32, 26))
+    image = canvas()
+    for i, points in enumerate(parts[:2]):
+        polyline(image, points, closed=True, seed=i)
+    result = scores(score(16, image))
+    assert result["C"] == 0 and result["G"] == 0 and result["E"] == 0
+    image = canvas()
+    for i, points in enumerate(parts[:3]):
+        polyline(image, points, closed=True, seed=i)
+    no_links = scores(score(16, image))
+    assert no_links["D"] == 0 and no_links["G"] == 0 and no_links["F"] == 0
+
+
+def test_item16_tilted_small_triangle_fails_global_d():
+    image = canvas()
+    for i, points in enumerate(nested_triangles((32, 26), small_shift=(4.5, 0))):
+        polyline(image, points, closed=len(points) == 3, seed=i)
+    result = score(16, image)
+    assert scores(result)["D"] == 0
+    assert result.measures["alignement_sommets_mm"] > 4
+
+
+def test_item17_single_lines_and_wide_angle():
+    image = polyline(canvas(), [(10, 26), (32, 57), (54, 26)])
+    assert scores(score(17, image))["C"] == 0
+    image = canvas()
+    for i, points in enumerate(v_shape((32, 57), height=14, width=60)):
+        polyline(image, points, closed=True, seed=i)
+    flat = scores(score(17, image))
+    assert flat["G"] == 0 and flat["D"] == 0
+
+
+def test_item17_tilted_tops_fail_general():
+    image = canvas()
+    for i, points in enumerate(v_shape((32, 57), tilt=9)):
+        polyline(image, points, closed=True, seed=i)
+    result = scores(score(17, image))
+    assert result["G"] == 0 and result["C"] == 1
+
+
+def test_item18_step_count_and_heights():
+    three = scores(score(18, polyline(canvas(), stairs_points((10, 20), step=14, steps=3),
+                                      closed=True)))
+    assert three["E"] == 0 and three["G"] == 0 and three["C"] == 1
+    five = scores(score(18, polyline(canvas(), stairs_points((7, 15), step=10, steps=5),
+                                     closed=True)))
+    assert five["F"] == 0 and five["E"] == 0
+    uneven = scores(score(18, polyline(canvas(), stairs_points((7.5, 15),
+                                                               heights=[16, 12.3, 12.3, 12.3]),
+                                       closed=True)))
+    assert uneven["D"] == 0 and uneven["E"] == 1
 
 
 def test_borderline_measure_is_flagged():
