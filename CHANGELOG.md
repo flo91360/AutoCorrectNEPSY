@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.7.2] - 2026-10-25
+
+- Item 10 : le coin du triangle est pris là où un autre trait touche son côté, même si le côté se prolonge un peu au-delà (même cotation à 200 et 300 dpi)
+
 ## [0.7.1] - 2026-10-25
 
 - Cotation indépendante de la résolution du scan : recherche d'ellipses systématique (seau, roues) et scans plus fins que 200 dpi ramenés à 200 dpi

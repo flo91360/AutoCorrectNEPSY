@@ -4,7 +4,10 @@ Seuils repris du manuel NEPSY-II (Copie de figures), reformulés.
 
 Le haut du trapèze peut être tracé en plusieurs morceaux (de part et d'autre du
 triangle) : ses coins sont pris là où ses côtés obliques le rejoignent, et les
-coins du triangle au bas de ses côtés.
+coins du triangle au bas de ses côtés. Quand un côté du triangle se prolonge
+un peu au-delà de l'endroit où un autre trait le touche (il continue le long
+du haut du trapèze), le coin est à cette jonction : selon les petits détails
+du tracé, ce prolongement est rattaché au côté ou à l'autre trait.
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ HORIZONTAL_DEG = 30.0  # côtés horizontaux : base du triangle, haut et bas du 
 APEX_MAX_GAP_MM = 8.0  # les deux côtés du triangle se rejoignent au sommet
 CROSSING_MM = 5.0  # côté du triangle qui traverse le haut du trapèze : coin à la traversée
 OWN_BASE_MM = 3.0  # base propre du triangle : ses bouts sont aux coins du triangle
+TOUCH_MM = 1.0  # le bout d'un autre trait touche le côté du triangle
+TAIL_MAX_FRACTION = 0.25  # prolongement coupé : au plus ce quart du côté
 GENERAL_MAX_GAP_MM = 3.0  # base du triangle / côté supérieur du trapèze
 GENERAL_MAX_PARTS_RATIO = 1.5  # parties du côté supérieur de part et d'autre du triangle
 GLOBAL_MAX_GAP_MM = 5.0  # Global C
@@ -65,11 +70,12 @@ def score(drawing: Drawing, item: int = 10) -> ItemResult:
     sides = _triangle_sides(lines)
     if sides is None:
         return fail("triangle non reconnu (deux côtés qui se rejoignent en un sommet)")
-    left, right = sides
+    drawn = list(sides)  # côtés tels que tracés, avant coupe
+    left, right = (_cut_at_junction(side, drawing) for side in sides)
     apex = intersection(left, right)
     if apex is None:
         apex = (_top(left) + _top(right)) / 2
-    rest = [l for l in lines if l is not left and l is not right]
+    rest = [l for l in lines if all(l is not side for side in drawn)]
     horizontals = [l for l in rest if l.angle_to_horizontal() <= HORIZONTAL_DEG
                    and l.center[1] > apex[1]]
     lowest_side = max(_bottom(left)[1], _bottom(right)[1])
@@ -95,6 +101,7 @@ def score(drawing: Drawing, item: int = 10) -> ItemResult:
     own_base = next((l for l in uppers if _joins(l, pl, pr)), None)
     figure = list({id(l): l for l in (left, right, bottom, leg_left, leg_right, top_left,
                                       top_right, own_base) if l is not None}.values())
+    owned = figure + drawn  # lignes du dessin qui appartiennent à la figure
 
     base_length = float(np.linalg.norm(pr - pl))
     top_length = float(np.linalg.norm(tr - tl))
@@ -103,7 +110,7 @@ def score(drawing: Drawing, item: int = 10) -> ItemResult:
     parts_ratio = (max(left_part, right_part) / min(left_part, right_part)
                    if min(left_part, right_part) > 0 else float("inf"))
     # Écart entre chaque coin du triangle et le tracé du trapèze (hors base propre).
-    excluded = {id(l) for l in (left, right, own_base, leg_left, leg_right, bottom)}
+    excluded = {id(l) for l in (*drawn, own_base, leg_left, leg_right, bottom)}
     others = [l for l in drawing.lines if id(l) not in excluded]
     corner_gaps = [_distance_to_lines(p, others) for p in (pl, pr)]
     gap = max(corner_gaps)
@@ -129,7 +136,7 @@ def score(drawing: Drawing, item: int = 10) -> ItemResult:
 
     def junction(name: str, point: np.ndarray, *meeting: StraightLine,
                  extra: float = 0.0) -> tuple[str, np.ndarray, float]:
-        values = [extra, dangling_tail(drawing, figure, point)]
+        values = [extra, dangling_tail(drawing, owned, point)]
         for line in meeting:
             at = end_at(line, point)
             values += [at.gap, at.overshoot]
@@ -176,7 +183,7 @@ def score(drawing: Drawing, item: int = 10) -> ItemResult:
 
     checks["E"].add(trapezoid, f"triangle et trapèze isocèle ({trapezoid_text})")
 
-    extras = extra_elements(drawing, figure)
+    extras = extra_elements(drawing, owned)
     checks["F"].add(not extras, "aucun autre élément" if not extras
                     else f"{len(extras)} élément(s) en trop")
     checks["F"].limit(height_ratio, f"hauteur / base du triangle {fmt_ratio(height_ratio)} "
@@ -221,6 +228,30 @@ def _triangle_sides(lines: list[StraightLine]) -> tuple[StraightLine, StraightLi
         if best is None or a.length + b.length > best[0]:
             best = (a.length + b.length, a, b)
     return None if best is None else (best[1], best[2])
+
+
+def _cut_at_junction(side: StraightLine, drawing: Drawing) -> StraightLine:
+    """Côté du triangle coupé là où le bout d'un autre trait le touche près de
+    son bas : au-delà, le trait continue le long du haut du trapèze."""
+    top = _top(side)
+    down = 1.0 if side.position(_bottom(side)) > side.position(top) else -1.0
+    bottom_at = down * side.position(_bottom(side))
+    cut = None
+    for stroke in drawing.strokes:
+        if stroke.closed or len(stroke.points) < 2:
+            continue
+        for end in (stroke.points[0], stroke.points[-1]):
+            gaps = np.linalg.norm(side.points - end, axis=1)
+            if gaps.min() > TOUCH_MM:
+                continue
+            at = down * side.position(side.points[int(np.argmin(gaps))])
+            tail = bottom_at - at
+            if TOUCH_MM < tail <= TAIL_MAX_FRACTION * side.length and (cut is None or at < cut):
+                cut = at
+    if cut is None:
+        return side
+    kept = side.points[down * ((side.points - side.center) @ side.direction) <= cut]
+    return StraightLine([kept], side.stroke_width) if len(kept) >= 3 else side
 
 
 def _leg(slanted: list[StraightLine], corner: np.ndarray, left_side: bool,
