@@ -34,6 +34,13 @@ MERGE_GAP_MM = 10.0  # interruption max entre deux morceaux d'une même ligne
 INTERRUPTION_MM = 0.5  # vide minimal le long d'une ligne pour une interruption
 DOUBLED_SEPARATION_MM = 0.8  # écart à partir duquel deux passages se distinguent
 CONVERGENCE_EDGES = 5  # nœud où convergent au moins autant de traits (éventail)
+# Coin arrondi : le changement de direction s'étale sur plusieurs mm et passe
+# sous CORNER_ANGLE à l'échelle CORNER_SCALE_MM. Un morceau peu droit est
+# recoupé à cette échelle plus large, si cela donne des côtés droits.
+ROUNDED_SCALE_MM = 5.0
+ROUNDED_MIN_WIDTH_MM = 2.0  # morceau plus large : peut-être des côtés reliés par un coin arrondi
+ROUNDED_CORE_WIDTH_MM = 1.5  # partie centrale d'un côté (hors coins) : droite
+ROUNDED_MIN_CORE_MM = 5.0
 
 _OFFSETS = [(-1, -1), (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1)]
 
@@ -202,7 +209,7 @@ class Drawing:
     @cached_property
     def lines(self) -> list[StraightLine]:
         """Lignes droites du dessin, des plus longues aux plus courtes."""
-        pieces = [piece for stroke in self.strokes for piece in split_at_corners(stroke)]
+        pieces = [piece for stroke in self.strokes for piece in split_straight(stroke)]
         return merge_collinear(pieces, self.stroke_width)
 
     def significant_lines(self, min_fraction: float = 0.12,
@@ -548,10 +555,43 @@ def _unwind(parent, node) -> list[int]:
     return path[::-1]
 
 
-def split_at_corners(stroke: Stroke, angle: float = CORNER_ANGLE) -> list[np.ndarray]:
-    """Coupe un trait aux changements de direction de plus de ``angle`` degrés."""
+def split_straight(stroke: Stroke) -> list[np.ndarray]:
+    """Morceaux droits d'un trait : coupé aux angles, y compris aux coins arrondis.
+
+    Un trait non coupé mais peu droit (carré aux coins arrondis tracé d'un seul
+    geste) est recoupé à une échelle plus large. La coupe n'est gardée que si
+    tous les coins tournent dans le même sens (une ligne ondulée tourne dans un
+    sens puis dans l'autre) et si chaque côté a une partie centrale droite (un
+    cercle n'en a pas).
+    """
+    pieces = split_at_corners(stroke)
+    if len(pieces) > 1 or geo.min_strip_width(pieces[0]) <= ROUNDED_MIN_WIDTH_MM:
+        return pieces
+    sides = split_at_corners(stroke, scale_mm=ROUNDED_SCALE_MM)
+    if len(sides) < 2 or not all(_straight_core(side) for side in sides):
+        return pieces
+    directions = [geo.unit(side[-1] - side[0]) for side in sides]
+    pairs = list(zip(directions, directions[1:] + (directions[:1] if stroke.closed else [])))
+    turns = [a[0] * b[1] - a[1] * b[0] for a, b in pairs]  # sens de chaque coin
+    if not (all(t > 0 for t in turns) or all(t < 0 for t in turns)):
+        return pieces
+    return sides
+
+
+def _straight_core(side: np.ndarray) -> bool:
+    """La partie du côté à plus de ROUNDED_SCALE_MM de ses deux bouts est droite."""
+    along = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(side, axis=0), axis=1))])
+    core = side[(along >= ROUNDED_SCALE_MM) & (along <= along[-1] - ROUNDED_SCALE_MM)]
+    return (len(core) >= 2 and geo.path_length(core) >= ROUNDED_MIN_CORE_MM
+            and geo.min_strip_width(core) <= ROUNDED_CORE_WIDTH_MM)
+
+
+def split_at_corners(stroke: Stroke, angle: float = CORNER_ANGLE,
+                     scale_mm: float = CORNER_SCALE_MM) -> list[np.ndarray]:
+    """Coupe un trait aux changements de direction de plus de ``angle`` degrés,
+    mesurés sur ``scale_mm`` de part et d'autre de chaque point."""
     pts = stroke.points
-    k = max(2, int(round(CORNER_SCALE_MM / STEP_MM)))
+    k = max(2, int(round(scale_mm / STEP_MM)))
     n = len(pts)
     if n < 2 * k + 1:
         return [pts]

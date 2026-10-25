@@ -114,3 +114,20 @@ def test_isolated_marks_are_measured():
     assert speck.length < 1.2
     # Écart bord à bord : 20 mm entre centres, moins les deux rayons.
     assert disk.distance_to(ring) == pytest.approx(20 - 1.0 - 1.85, abs=0.5)
+
+
+@pytest.mark.parametrize("turn, count", [(30, 1), (40, 2)])
+def test_line_is_cut_at_a_corner_of_more_than_35_degrees(turn, count):
+    a = np.radians(turn)
+    points = [(10, 70), (35, 70), (35 + 25 * np.cos(a), 70 - 25 * np.sin(a))]
+    assert len(drawing_of(polyline(canvas(), points)).significant_lines()) == count
+
+
+@pytest.mark.parametrize("gap, count", [(9.0, 1), (11.0, 2)])
+def test_aligned_pieces_form_one_line_up_to_a_10_mm_gap(gap, count):
+    image = polyline(canvas(), [(5, 40), (25, 40)])
+    polyline(image, [(25 + gap, 40), (58, 40)], seed=1)
+    lines = drawing_of(image).significant_lines()
+    assert len(lines) == count
+    if count == 1:
+        assert lines[0].interruptions == 1

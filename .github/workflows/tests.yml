@@ -76,8 +76,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      # Python 3.12 : versions exactes de l'exécutable (packaging/contraintes.txt) ;
+      # Python 3.10 : dernières versions compatibles, pour voir venir les ruptures.
       - name: Installer
-        run: python -m pip install -e ".[test]"
+        run: python -m pip install -e ".[test]" ${{ matrix.python-version == '3.12' && '-c packaging/contraintes.txt' || '' }}
       - name: Écran virtuel pour les tests de l'interface
         if: runner.os == 'Linux'
         run: sudo apt-get install -y -q xvfb
@@ -110,7 +112,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Installer
-        run: python -m pip install -e ".[exe]"
+        run: python -m pip install -e ".[exe]" -c packaging/contraintes.txt
       - name: Construire AutoCorrectNEPSY.exe
         run: python packaging/build.py
       - name: Tester l'exécutable

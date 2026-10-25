@@ -148,7 +148,8 @@ def prepare_page(page: ScannedPage, ink: str = "bleu") -> PreparedPage:
     if len(columns) not in (3, 4):
         raise LayoutError(f"{len(columns)} zones d'items trouvées : ce n'est pas une page du "
                           "cahier de Copie de figures, ou le scan est incomplet")
-    return PreparedPage(image, ink_mask(image, ink), page.px_per_mm * scale, turns, skew,
+    px_per_mm = page.px_per_mm * scale
+    return PreparedPage(image, ink_mask(image, ink, px_per_mm), px_per_mm, turns, skew,
                         separator, columns, top, bottom, scale)
 
 

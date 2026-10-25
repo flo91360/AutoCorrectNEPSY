@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 
 from .. import geometry as geo
-from ..strokes import Drawing
+from ..strokes import Drawing, StraightLine
 from .base import Checks, ItemResult, empty_result, fmt
 from . import marks as mk
 
@@ -26,7 +26,7 @@ APEX_IGNORE_MM = 3.0
 def score(drawing: Drawing, item: int) -> ItemResult:
     if drawing.is_empty or not drawing.lines:
         return empty_result(item, ("G", "A", "B", "C", "D"), "aucun tracé dans la zone")
-    line = drawing.lines[0]
+    line, notes = _trace(drawing)
     if item == 1:
         axis, name, deviation = np.array([0.0, 1.0]), "la verticale", line.angle_to_vertical()
     else:
@@ -56,13 +56,6 @@ def score(drawing: Drawing, item: int) -> ItemResult:
              mk.angle(start, start + axis * min(15.0, length), end,
                       f"{deviation:.0f}° / {'verticale' if item == 1 else 'horizontale'}")]
 
-    # Seule la plus longue ligne est notée : un trait brisé ou en zigzag, ou un
-    # trait en trop, donne plusieurs lignes et la note peut ne pas le refléter.
-    count = len(drawing.significant_lines())
-    notes = [] if count <= 1 else [
-        f"{count} lignes dans la zone (trait brisé, en zigzag ou trait en trop) : seule la "
-        "plus longue est notée, vérifier la cotation"]
-
     return ItemResult(
         item,
         {"G": general.criterion("G"), "A": motor_a.criterion("A"),
@@ -73,3 +66,33 @@ def score(drawing: Drawing, item: int) -> ItemResult:
         notes=notes,
         marks=marks,
     )
+
+
+def _trace(drawing: Drawing) -> tuple[StraightLine, list[str]]:
+    """Le trait noté : le ou les traits continus qui portent la plus longue ligne
+    droite, en entier (un zigzag, une ondulation ou un crochet en font partie, et
+    comptent pour la longueur, la barre grisée et l'écart à l'axe).
+
+    Un trait brisé en plusieurs lignes droites, ou d'autres traits dans la zone,
+    sont signalés : la règle du manuel les tranche mal.
+    """
+    longest = drawing.lines[0]
+    strokes = [s.points for s in drawing.strokes
+               if any(_shares(s.points, piece) for piece in longest.pieces)]
+    trace = StraightLine(strokes or longest.pieces, drawing.stroke_width)
+    lines = drawing.significant_lines()
+    inside = [l for l in lines if any(_shares(s, piece) for s in strokes for piece in l.pieces)]
+    notes = []
+    if len(inside) > 1:
+        notes.append(f"trait brisé ou en zigzag ({len(inside)} morceaux droits) : mesuré en "
+                     "entier, vérifier la cotation")
+    if len(lines) > len(inside):
+        notes.append(f"{len(lines) - len(inside)} trait(s) en plus du trait noté : vérifier la "
+                     "cotation")
+    return trace, notes
+
+
+def _shares(points: np.ndarray, piece: np.ndarray) -> bool:
+    """Le morceau fait partie de ce trait (même point au milieu du morceau)."""
+    middle = piece[len(piece) // 2]
+    return bool(np.min(np.abs(points - middle).sum(axis=1)) < 1e-9)

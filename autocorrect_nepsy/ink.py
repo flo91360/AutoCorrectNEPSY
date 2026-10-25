@@ -24,16 +24,24 @@ MIN_INK_SATURATION = 70
 MIN_DARK_INK_SATURATION = 40
 DARK_INK_CONTRAST = 0.5
 MAX_PRINT_SATURATION = 60
+# Un trait de crayon (ou d'impression) qui croise le tracé de l'enfant le masque
+# sur sa largeur : le tracé serait coupé en deux, puis compté comme deux
+# éléments. Les pixels de crayon qui bouchent une coupure plus courte que
+# BRIDGE_MM sont rendus au tracé.
+BRIDGE_MM = 1.6
+WORK_PX_PER_MM = 200 / 25.4  # résolution de travail (voir layout.WORK_DPI)
 
 
-def ink_mask(image_bgr: np.ndarray, ink: str = "bleu") -> np.ndarray:
+def ink_mask(image_bgr: np.ndarray, ink: str = "bleu",
+             px_per_mm: float = WORK_PX_PER_MM) -> np.ndarray:
     """Masque binaire (uint8 0/1) des pixels de l'encre de l'enfant.
 
     Seuillage à deux niveaux : les pixels nettement colorés servent de point de
     départ, et les pixels de la même teinte mais plus foncés (encre épaisse)
     sont ajoutés quand ils les prolongent. Sans cela, un trait continu serait
     coupé là où l'encre est plus foncée, et compté comme interrompu. Le crayon
-    de l'ergothérapeute, gris et sans teinte, reste exclu.
+    de l'ergothérapeute, gris et sans teinte, reste exclu, sauf là où il coupe
+    le tracé de l'enfant (voir ``BRIDGE_MM``).
     """
     if ink not in INK_HUES:
         raise ValueError(f"encre inconnue : {ink} (choix : {', '.join(INK_HUES)})")
@@ -54,7 +62,11 @@ def ink_mask(image_bgr: np.ndarray, ink: str = "bleu") -> np.ndarray:
     keep = np.zeros(count, bool)
     keep[np.unique(labels[strong > 0])] = True
     keep[0] = False
-    return keep[labels].astype(np.uint8)
+    child = keep[labels].astype(np.uint8)
+    size = max(3, int(round(BRIDGE_MM * px_per_mm)) | 1)
+    closed = cv2.morphologyEx(child, cv2.MORPH_CLOSE,
+                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
+    return child | (closed & printed_mask(image_bgr))
 
 
 def printed_mask(image_bgr: np.ndarray) -> np.ndarray:

@@ -59,7 +59,9 @@ Lancer la fenêtre : `python -m autocorrect_nepsy` (ou `autocorrect-nepsy-gui`).
   plus, et la cotation ne dépend pas de la résolution du scan.
 - Le sens du scan n'a pas d'importance, une légère inclinaison est corrigée.
 - L'enfant dessine au **stylo** (bleu par défaut, voir `--encre`). Les
-  annotations de l'ergothérapeute au crayon à papier sont ignorées.
+  annotations de l'ergothérapeute au crayon à papier sont ignorées, y compris
+  un trait de crayon qui coupe le tracé de l'enfant (pas un trait de crayon
+  posé le long de ce tracé, qui le masque).
 
 ### Corriger
 
@@ -148,11 +150,12 @@ partir du manuel et ne le remplacent pas.
   que l'ergothérapeute annote dans une autre couleur.
 - Un dessin qui déborde de sa zone n'est pas pris en compte en dehors de la
   zone.
-- Une figure aux coins très arrondis (carré de l'item 4 aux coins de plus de
-  3 à 4 mm de rayon, par exemple) peut ne pas être reconnue : l'item est alors
-  noté 0 et signalé « à vérifier ».
-- Aux items 1 et 2, seule la plus longue ligne droite est notée : un trait en
-  zigzag ou un trait en trop est signalé « à vérifier ».
+- Les coins arrondis sont reconnus jusqu'à 6 mm de rayon environ pour un
+  carré de 4 cm ; au-delà, ou avec un fort tremblement, la figure peut ne pas
+  être reconnue : l'item est alors noté 0 et signalé « à vérifier ».
+- Aux items 1 et 2, le trait noté est le trait continu qui porte la plus
+  longue ligne droite, mesuré en entier (zigzag, ondulation ou crochet
+  compris) ; un trait brisé ou un trait en plus est signalé « à vérifier ».
 - Un petit gribouillis peut être pris pour une petite figure (cercle de
   l'item 3, V de l'item 17, cylindre de l'item 14) et recevoir quelques points
   sans être signalé.
@@ -171,9 +174,15 @@ continue, `AUTOCORRECT_TESTS_INTERFACE=obligatoires` les rend obligatoires.
 ### Construire l'exécutable
 
 ```bash
-python -m pip install -e ".[exe]"
+python -m pip install -e ".[exe]" -c packaging/contraintes.txt
 python packaging/build.py      # produit dist/AutoCorrectNEPSY(.exe)
 ```
+
+`packaging/contraintes.txt` fixe les versions exactes des dépendances (numpy,
+OpenCV, Pillow, pypdf, PyInstaller) de l'exécutable et des tests sous
+Python 3.12 : deux Releases notent un même scan de la même façon. Pour les
+mettre à jour, changer les versions dans ce fichier, vérifier que la CI reste
+verte, puis livrer une nouvelle version.
 
 L'intégration continue (workflow « Tests et exécutable Windows ») construit et
 teste `AutoCorrectNEPSY.exe` sous Windows après les tests ; l'exécutable de
