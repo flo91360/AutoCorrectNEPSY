@@ -68,6 +68,49 @@ def check_direction_changes(checks: Checks, lines: list[StraightLine], maximum: 
                    f"de direction ≤ {maximum}")
 
 
+def split_line(line: StraightLine, points: list[np.ndarray],
+               margin: float = 2.0) -> list[StraightLine]:
+    """Morceaux d'une ligne de part et d'autre des ``points`` de jonction : ce
+    sont des côtés distincts de la figure, dont la rectitude se mesure à part."""
+    cuts = sorted(t for t in (line.position(p) for p in points)
+                  if line.t0 + margin < t < line.t1 - margin)
+    if not cuts:
+        return [line]
+    bounds = [line.t0 - 1.0, *cuts, line.t1 + 1.0]
+    parts = []
+    for lo, hi in zip(bounds, bounds[1:]):
+        pieces = []
+        for piece in line.pieces:
+            t = (piece - line.center) @ line.direction
+            kept = piece[(t >= lo) & (t <= hi)]
+            if len(kept) >= 2:
+                pieces.append(kept)
+        if pieces:
+            parts.append(StraightLine(pieces, line.stroke_width))
+    return parts
+
+
+def dangling_tail(drawing: Drawing, figure: list[StraightLine], point: np.ndarray) -> float:
+    """Longueur (mm) du plus long bout de trait libre qui part de ``point`` :
+    un petit trait hors de la figure, accroché à cette jonction par un bout et
+    libre à l'autre (dépassement au-delà d'une intersection)."""
+    figure_ids = {id(line) for line in figure}
+    figure_points = np.vstack([line.points for line in figure])
+    touch = 1.0 + drawing.stroke_width
+    longest = 0.0
+    for line in drawing.lines:
+        if id(line) in figure_ids or line.length > EXTRA_ELEMENT_MM:
+            continue
+        near, far = sorted(line.ends, key=lambda p: np.linalg.norm(p - point))
+        if np.linalg.norm(near - point) > touch:
+            continue
+        # Bout libre : il s'écarte nettement de la figure (pas un morceau qui la longe).
+        free = max(drawing.stroke_width, 0.4 * line.length)
+        if np.sqrt(((figure_points - far) ** 2).sum(axis=1)).min() > free:
+            longest = max(longest, line.length)
+    return longest
+
+
 def review_notes(lines: list[StraightLine]) -> list[str]:
     """Situations que les règles tranchent mal : à faire vérifier."""
     notes = []

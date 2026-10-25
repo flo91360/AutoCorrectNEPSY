@@ -6,14 +6,14 @@ cotation que l'ergothérapeute valide.
 
 ## État
 
-- Items **1 à 8** pris en charge, avec tous leurs critères : Général, Motricité
+- Items **1 à 11** pris en charge, avec tous leurs critères : Général, Motricité
   A/B, Global C/D, Local E/F (pas de Local pour les items 1 à 3).
 - Chaque critère est accompagné des mesures qui le justifient (longueurs en mm,
   angles, rapports).
 - Les items douteux sont signalés **« à vérifier »** : mesure proche d'un seuil,
   trait repassé à côté du premier tracé, zone vide.
-- Premier essai sur un protocole réel : 46 critères sur 50 identiques à la
-  cotation de l'ergothérapeute (kappa de Cohen 0,71).
+- Premier essai sur un protocole réel : 64 critères sur 71 identiques à la
+  cotation de l'ergothérapeute (kappa de Cohen 0,74).
 
 ## Pour l'ergothérapeute : le logiciel Windows
 

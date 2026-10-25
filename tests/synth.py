@@ -43,6 +43,20 @@ def polyline(image: np.ndarray, points_mm, color=BLUE_PEN, width_mm: float = 0.4
     return image
 
 
+def dot(image: np.ndarray, center_mm, diameter_mm: float, color=BLUE_PEN,
+        ppm: float = PX_PER_MM, offset=(0.0, 0.0)) -> np.ndarray:
+    """Cercle plein (rond colorié au stylo)."""
+    x, y = (np.asarray(center_mm, float) + np.asarray(offset, float)) * ppm
+    cv2.circle(image, (int(round(x)), int(round(y))), max(1, int(round(diameter_mm * ppm / 2))),
+               color, -1, cv2.LINE_AA)
+    return image
+
+
+def dot_row(start, step, count: int = 10):
+    """Centres de ``count`` marques espacées de ``step`` (mm) à partir de ``start``."""
+    return [np.asarray(start, float) + i * np.asarray(step, float) for i in range(count)]
+
+
 def circle_points(center, radius: float, start_deg: float = 0, sweep_deg: float = 360,
                   ry: float | None = None) -> np.ndarray:
     angles = np.radians(np.linspace(start_deg, start_deg + sweep_deg, 240))
@@ -76,6 +90,17 @@ def draw_model(item: int, image: np.ndarray, color=BLUE_PEN, wobble: float = 0.0
     elif item == 8:
         for i, y in enumerate((24, 44, 64)):
             draw(circle_points((32, y), 13), closed=True, seed=i)
+    elif item == 9:
+        rng = np.random.default_rng(9)
+        for center in dot_row((18, 58), (3, -3)):
+            jitter = rng.uniform(-1, 1, 2) * wobble * 0.3
+            dot(image, center + jitter, 1.9, color, ppm, offset)
+    elif item == 10:
+        draw([(20, 42), (32, 20), (44, 42)])
+        draw([(14, 42), (50, 42), (44, 51), (20, 51)], closed=True, seed=1)
+    elif item == 11:
+        draw([(4, 24), (60, 24), (60, 64), (4, 64)], closed=True)
+        draw([(4, 43), (24, 43), (24, 24)], seed=1)
     else:
         raise ValueError(item)
     return image

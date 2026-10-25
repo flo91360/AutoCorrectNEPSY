@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Callable
 
 from ..strokes import Drawing
-from . import item_01_02, item_03, item_04, item_05, item_06, item_07, item_08
+from . import (item_01_02, item_03, item_04, item_05, item_06, item_07, item_08, item_09,
+               item_10, item_11)
 from .base import CODES, PROCESS_NAMES, Criterion, ItemResult
 
 SCORERS: dict[int, Callable[[Drawing, int], ItemResult]] = {
@@ -17,6 +18,9 @@ SCORERS: dict[int, Callable[[Drawing, int], ItemResult]] = {
     6: item_06.score,
     7: item_07.score,
     8: item_08.score,
+    9: item_09.score,
+    10: item_10.score,
+    11: item_11.score,
 }
 
 SUPPORTED_ITEMS = tuple(sorted(SCORERS))

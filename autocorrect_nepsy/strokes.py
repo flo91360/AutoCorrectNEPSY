@@ -25,6 +25,7 @@ from . import geometry as geo
 STEP_MM = 0.3  # pas de rééchantillonnage des traits
 NODE_RADIUS_MM = 1.2  # rayon de regroupement des pixels de croisement
 MIN_COMPONENT_MM = 1.0  # taches plus petites ignorées (poussières, bavures)
+MIN_BLOB_MM = 0.5  # plus petite tache gardée comme marque (point de stylo)
 CORNER_SCALE_MM = 2.0  # demi-fenêtre de calcul des angles le long d'un trait
 CORNER_ANGLE = 35.0  # changement de direction au-delà duquel on coupe le trait
 MERGE_ANGLE = 15.0  # écart d'orientation max pour raccorder deux morceaux
@@ -131,12 +132,44 @@ class StraightLine:
 
 
 @dataclass
+class Blob:
+    """Tache d'encre d'un seul tenant (point, cercle plein ou vide, tiret…).
+
+    Les mesures comprennent l'épaisseur de l'encre."""
+
+    center: np.ndarray  # centre de l'encre
+    outline: np.ndarray  # contour extérieur
+    area: float  # surface encrée (mm²)
+    enclosed: float  # surface délimitée par le contour extérieur, trous compris (mm²)
+    hull: float  # surface de l'enveloppe convexe (mm²)
+    diameter: float  # plus petit cercle qui contient la tache
+    length: float  # plus grande dimension
+    width: float  # plus petite largeur
+
+    @property
+    def solidity(self) -> float:
+        """Part encrée de l'enveloppe convexe : proche de 1 pour une tache pleine."""
+        return self.area / max(self.hull, 1e-9)
+
+    @property
+    def hole_fraction(self) -> float:
+        """Part non encrée à l'intérieur du contour (cercle vide)."""
+        return 1.0 - self.area / max(self.enclosed, 1e-9)
+
+    def distance_to(self, other: "Blob") -> float:
+        """Plus petit écart entre les deux taches (bord à bord)."""
+        diff = self.outline[:, None, :] - other.outline[None, :, :]
+        return float(np.sqrt((diff ** 2).sum(-1)).min())
+
+
+@dataclass
 class Drawing:
     """Dessin de l'enfant pour un item."""
 
     strokes: list[Stroke]
     stroke_width: float
     component_sizes: list[float]
+    blobs: list[Blob] = field(default_factory=list)  # taches isolées, petites comprises
 
     @property
     def is_empty(self) -> bool:
@@ -166,10 +199,12 @@ class Drawing:
 
 def extract_drawing(ink: np.ndarray, px_per_mm: float) -> Drawing:
     """Construit le dessin (traits en mm) à partir du masque d'encre d'une zone."""
-    mask = _clean(ink, px_per_mm)
+    closed = _close(ink, px_per_mm)
+    blobs = _blobs(closed, px_per_mm)
+    mask = _remove_dust(closed, px_per_mm)
     skeleton = skeletonize(mask.astype(bool))
     if not skeleton.any():
-        return Drawing([], 0.0, [])
+        return Drawing([], 0.0, [], blobs)
     stroke_width = float(mask.sum() / max(1, skeleton.sum())) / px_per_mm
     graph = _SkeletonGraph(skeleton, px_per_mm)
     strokes = [Stroke(geo.resample(points, STEP_MM, closed), closed)
@@ -180,7 +215,7 @@ def extract_drawing(ink: np.ndarray, px_per_mm: float) -> Drawing:
     for label in range(1, count):
         ys, xs = np.nonzero(labels == label)
         sizes.append(geo.max_diameter(np.column_stack([xs, ys]).astype(float)) / px_per_mm)
-    return Drawing(strokes, stroke_width, sorted(sizes, reverse=True))
+    return Drawing(strokes, stroke_width, sorted(sizes, reverse=True), blobs)
 
 
 def skeletonize(mask: np.ndarray) -> np.ndarray:
@@ -210,11 +245,44 @@ def skeletonize(mask: np.ndarray) -> np.ndarray:
             return core.copy()
 
 
-def _clean(ink: np.ndarray, px_per_mm: float) -> np.ndarray:
-    """Bouche les micro-sauts du stylo et retire les poussières."""
+def _close(ink: np.ndarray, px_per_mm: float) -> np.ndarray:
+    """Bouche les micro-sauts du stylo."""
     radius = max(1, int(round(0.25 * px_per_mm)))
     disk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
-    mask = cv2.morphologyEx(ink.astype(np.uint8), cv2.MORPH_CLOSE, disk)
+    return cv2.morphologyEx(ink.astype(np.uint8), cv2.MORPH_CLOSE, disk)
+
+
+def _blobs(mask: np.ndarray, px_per_mm: float) -> list[Blob]:
+    """Taches d'encre d'un seul tenant, mesurées une à une."""
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    area_mm2 = px_per_mm ** 2
+    blobs = []
+    for label in range(1, count):
+        x, y, w, h, area = stats[label]
+        if max(w, h) < MIN_BLOB_MM * px_per_mm:
+            continue
+        piece = np.pad((labels[y:y + h, x:x + w] == label).astype(np.uint8), 1)
+        contours, _ = cv2.findContours(piece, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        contour = max(contours, key=len)
+        filled = np.zeros_like(piece)
+        cv2.drawContours(filled, [contour], -1, 1, cv2.FILLED)
+        hull = np.zeros_like(piece)
+        cv2.fillConvexPoly(hull, cv2.convexHull(contour), 1)
+        (_, _), radius = cv2.minEnclosingCircle(contour)
+        outline = (contour.reshape(-1, 2) + (x - 1, y - 1)).astype(float) / px_per_mm
+        pixel = 1.0 / px_per_mm  # les mesures vont du bord extérieur des pixels
+        blobs.append(Blob(
+            center=centroids[label] / px_per_mm, outline=outline,
+            area=float(area) / area_mm2, enclosed=float(filled.sum()) / area_mm2,
+            hull=float(hull.sum()) / area_mm2, diameter=2 * radius / px_per_mm + pixel,
+            length=geo.max_diameter(outline) + pixel,
+            width=geo.min_strip_width(outline) + pixel))
+    return blobs
+
+
+def _remove_dust(mask: np.ndarray, px_per_mm: float) -> np.ndarray:
+    """Retire les poussières et bavures."""
+    mask = mask.copy()
     count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     min_size = MIN_COMPONENT_MM * px_per_mm
     for label in range(1, count):
