@@ -11,7 +11,6 @@ import html
 import json
 import os
 import queue
-import re
 import subprocess
 import sys
 import tempfile
@@ -27,14 +26,14 @@ import cv2
 from PIL import Image, ImageDraw, ImageTk
 
 from . import __version__
-from .compare import format_comparison, pair_scores, read_scores
+from .compare import format_comparison, pair_scores, read_flags, read_scores
 from .criteria import SUPPORTED_ITEMS
 from .ink import INK_HUES
 from .layout import (ITEMS_BY_PAGE, LayoutError, PreparedPage, guess_page_numbers, prepare_page,
                      uncertain_guesses)
 from .pipeline import Correction, PageInput, correct_pages, page_label
 from .report import save_results, score_row, totals
-from .scan import ScannedPage, load_pages
+from .scan import ScannedPage, load_pages, natural_key
 
 APP_NAME = "AutoCorrect NEPSY"
 SCAN_TYPES = [("Scans (PDF, images)", "*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp"),
@@ -97,10 +96,6 @@ def app_icon(size: int = 256) -> Image.Image:
     draw.ellipse((40 * s, 40 * s, 150 * s, 150 * s), outline="white", width=width)
     draw.rectangle((106 * s, 106 * s, 216 * s, 216 * s), outline="white", width=width)
     return image
-
-
-def natural_key(path: Path) -> list:
-    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", path.name)]
 
 
 def results_folder(first_scan: Path) -> Path:
@@ -677,8 +672,10 @@ class App:
         if not name:
             return
         try:
-            text = format_comparison(pair_scores(read_scores(self.output / "cotation.csv"),
-                                                 read_scores(name)))
+            auto = self.output / "cotation.csv"
+            flags = read_flags(auto)
+            text = format_comparison(pair_scores(read_scores(auto), read_scores(name), flags),
+                                     flags_known=flags is not None)
         except (OSError, KeyError, ValueError) as error:
             messagebox.showerror(APP_NAME, "Ce fichier ne peut pas être comparé. Il doit avoir "
                                  "les colonnes item, general, motricite_A, motricite_B, global_C, "

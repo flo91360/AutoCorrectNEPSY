@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from autocorrect_nepsy.cli import main
-from autocorrect_nepsy.compare import Pair, cohen_kappa, pair_scores, read_scores
+from autocorrect_nepsy.compare import Pair, cohen_kappa, pair_scores, read_flags, read_scores
 from autocorrect_nepsy.pipeline import page_label
 from autocorrect_nepsy.scan import load_pages
 
@@ -118,3 +118,16 @@ def test_missing_or_broken_scan_is_a_clean_error(tmp_path, capsys):
     for scan, message in ((tmp_path / "absent.pdf", "introuvable"), (broken, "PDF illisible")):
         assert main(["corriger", str(scan), "--pages", "2", "-o", str(tmp_path / "sortie")]) == 1
         assert message in capsys.readouterr().err
+
+
+def test_compare_shows_flagged_disagreements(tmp_path, capsys):
+    auto = tmp_path / "cotation.csv"
+    auto.write_text("item,general,motricite_A,a_verifier\n4,1,1,oui\n5,1,1,\n", encoding="utf-8")
+    ergo = tmp_path / "ergo.csv"
+    ergo.write_text("item,general,motricite_A\n4,0,1\n5,1,0\n", encoding="utf-8")
+    assert read_flags(auto) == {4} and read_flags(ergo) is None
+    assert main(["comparer", str(auto), str(ergo)]) == 0
+    out = capsys.readouterr().out
+    assert "Désaccords dans un item signalé « à vérifier » : 1/2" in out
+    assert "item  4  Général      1 / 0  (à vérifier)" in out
+    assert "item  5  Motricité A  1 / 0\n" in out + "\n"
