@@ -6,7 +6,7 @@ from autocorrect_nepsy.layout import (LayoutError, analyse_page, deskew, guess_p
                                       prepare_page)
 from autocorrect_nepsy.scan import ScannedPage
 
-from synth import page
+from synth import page, polyline
 
 DPI = 100
 
@@ -65,3 +65,17 @@ def test_page_structure_and_numbering():
     assert guess_page_numbers([four, four, three], fixed={0: 3}) == [3, 4, 5]
     zones = page1.layout(1).zones
     assert [zone.item for zone in zones] == [1, 2, 3]
+
+
+def test_drawing_past_the_end_of_the_separator_is_kept():
+    # L'enfant a dessiné au-delà du bout du trait de séparation (277 mm).
+    ppm = DPI / 25.4
+    image = page({0: 4, 1: 5, 2: 6, 3: 7})
+    polyline(image, [(270, 150), (285, 150)], ppm=ppm)
+    polyline(image, [(12, 160), (25, 160)], ppm=ppm)
+    layout = analyse_page(ScannedPage(image, DPI, "synthétique"), 2)
+    first, last = layout.zone(4).drawing_box, layout.zone(7).drawing_box
+    assert first[0] < 12 * ppm and last[2] > 285 * ppm
+    # En page 1, l'en-tête est à droite : la dernière zone n'y est pas élargie.
+    page1 = analyse_page(ScannedPage(page({0: 1, 1: 2, 2: 3}, layout="page1"), DPI, "p1"), 1)
+    assert page1.zone(3).drawing_box[2] < 213 * ppm

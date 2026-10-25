@@ -24,6 +24,8 @@ STROKE_COLORS = [(220, 40, 40), (30, 150, 30), (20, 90, 200), (230, 140, 0),
 LINE_COLOR = (150, 150, 150)
 MARK_COLOR = (30, 41, 59)
 BAND_COLOR = (148, 163, 184)
+BLOB_OK_COLOR = (30, 150, 30)  # tache qui convient (cercle plein)
+BLOB_BAD_COLOR = (220, 40, 40)  # point, tiret, cercle vide
 BAND_OPACITY = 0.3
 
 COTE_OFFSET_MM = 4.0  # distance entre le trait mesuré et sa cote
@@ -86,7 +88,10 @@ def measured_image(zone_shape: tuple[int, int], px_per_mm: float, strokes, lines
     height, width = zone_shape[:2]
     scale = RENDER_SCALE * DISPLAY_WIDTH / width
     k = px_per_mm * scale
-    points = np.vstack([s.points for s in strokes]) if strokes else np.zeros((1, 2))
+    if strokes:
+        points = np.vstack([s.points for s in strokes])
+    else:
+        points = np.array([p for mark in marks for p in mark.points] or [(0.0, 0.0)])
     canvas = _Canvas(int(width * scale), int(height * scale), k, points.mean(axis=0))
 
     bands = [m for m in marks if m.kind == "bande"]
@@ -134,6 +139,10 @@ def _draw_segment(canvas: _Canvas, mark) -> None:
     normal = np.array([-along[1], along[0]])
     for p in (a, b):
         canvas.line(p - normal * TICK_MM, p + normal * TICK_MM, MARK_COLOR, 2)
+    side = mark.extra.get("side")
+    if side is not None:
+        canvas.label(mark.label, (a + b) / 2, side)
+        return
     # Étiquette au bout le plus extérieur, dans le prolongement du segment : à
     # l'intérieur d'un cercle, elle se confondrait avec d'autres mesures.
     far, near = sorted((a, b), key=lambda p: -np.linalg.norm(p - canvas.center))
@@ -173,6 +182,20 @@ def _draw_circle(canvas: _Canvas, mark) -> None:
     canvas.label(mark.label, center + direction * mark.radius, direction)
 
 
+def _draw_blob(canvas: _Canvas, mark) -> None:
+    """Tache remplie de vert si elle convient, de rouge sinon, étiquette à côté."""
+    outline = np.array(mark.points)
+    color = BLOB_OK_COLOR if mark.extra.get("ok") else BLOB_BAD_COLOR
+    poly = np.array([canvas.px(p) for p in outline], np.int32)
+    cv2.fillPoly(canvas.image, [poly], _bgr(color), cv2.LINE_AA)
+    cv2.polylines(canvas.image, [poly], True, _bgr(color), 2, cv2.LINE_AA)
+    center = outline.mean(axis=0)
+    side = mark.extra.get("side")
+    direction = geo.unit(side) if side is not None else np.array([1.0, 0.0])
+    reach = float(np.max(np.linalg.norm(outline - center, axis=1)))
+    canvas.label(mark.label, center + direction * reach, direction)
+
+
 def _draw_band(canvas: _Canvas, mark) -> None:
     """Étiquette au milieu de la bande, côté intérieur du dessin, ou au bout le
     plus éloigné du centre, pour qu'on voie à quel trait elle se rapporte."""
@@ -190,7 +213,8 @@ def _draw_band(canvas: _Canvas, mark) -> None:
 
 
 _DRAW = {"cote": _draw_cote, "segment": _draw_segment, "angle": _draw_angle,
-         "point": _draw_point, "cercle": _draw_circle, "bande": _draw_band}
+         "point": _draw_point, "cercle": _draw_circle, "bande": _draw_band,
+         "tache": _draw_blob}
 
 
 def _draw_labels(canvas: _Canvas) -> np.ndarray:

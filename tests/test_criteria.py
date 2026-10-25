@@ -7,7 +7,7 @@ from autocorrect_nepsy.criteria import score_item
 from autocorrect_nepsy.ink import ink_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
-from synth import PX_PER_MM, canvas, circle_points, draw_model, polyline
+from synth import PX_PER_MM, canvas, circle_points, dot, dot_row, draw_model, polyline
 
 
 def score(item, image):
@@ -18,14 +18,15 @@ def scores(result):
     return {code: c.score for code, c in result.criteria.items()}
 
 
-@pytest.mark.parametrize("item", range(1, 9))
+@pytest.mark.parametrize("item", range(1, 12))
 @pytest.mark.parametrize("wobble", [0.0, 0.5])
 def test_faithful_copy_gets_full_marks(item, wobble):
     result = score(item, draw_model(item, canvas(), wobble=wobble))
     assert set(scores(result).values()) == {1}, {c: k.details for c, k in result.criteria.items()}
 
 
-@pytest.mark.parametrize("item, codes", [(1, "GABCD"), (4, "GABCDEF"), (8, "GABCDEF")])
+@pytest.mark.parametrize("item, codes", [(1, "GABCD"), (4, "GABCDEF"), (8, "GABCDEF"),
+                                         (9, "GABCDEF"), (10, "GABCDEF"), (11, "GABCDEF")])
 def test_empty_zone_scores_zero_and_asks_review(item, codes):
     result = score(item, canvas())
     assert scores(result) == {c: 0 for c in codes}
@@ -125,6 +126,98 @@ def test_item8_small_overlap_fails_global_d():
         polyline(image, circle_points((32, y), 13), closed=True)
     result = scores(score(8, image))
     assert result["D"] == 0 and result["C"] == 1
+
+
+def dots(centers, diameter=1.9):
+    image = canvas()
+    for center in centers:
+        dot(image, center, diameter)
+    return image
+
+
+def test_item9_dashes_instead_of_circles():
+    image = canvas()
+    for x, y in dot_row((18, 58), (3, -3)):
+        polyline(image, [(x - 0.8, y + 0.8), (x + 0.8, y - 0.8)])
+    result = scores(score(9, image))
+    assert result == {"G": 0, "A": 1, "B": 0, "C": 1, "D": 1, "E": 0, "F": 0}
+
+
+def test_item9_empty_circles_and_points_are_not_filled():
+    image = canvas()
+    for center in dot_row((14, 62), (4, -4)):
+        polyline(image, circle_points(center, 1.5), closed=True)
+    empty = scores(score(9, image))
+    assert empty["G"] == 0 and empty["E"] == 0 and empty["B"] == 1 and empty["C"] == 1
+    points = scores(score(9, dots(dot_row((18, 58), (3, -3)), diameter=0.8)))
+    assert points["G"] == 0 and points["E"] == 0 and points["A"] == 1 and points["D"] == 1
+
+
+def test_item9_flat_row_fails_global_d():
+    result = scores(score(9, dots(dot_row((10, 50), (4.2, -1.1)))))
+    assert result["D"] == 0 and result["G"] == 0 and result["C"] == 1 and result["E"] == 1
+
+
+def test_item9_extra_circles_and_wide_gaps_fail_local_f():
+    twelve = scores(score(9, dots(dot_row((12, 64), (3, -3), count=12))))
+    assert twelve["F"] == 0 and twelve["E"] == 0 and twelve["G"] == 0
+    spread = scores(score(9, dots(dot_row((6, 80), (5.5, -5.5)))))
+    assert spread["F"] == 0 and spread["E"] == 1 and spread["D"] == 1
+
+
+def test_item9_large_marks_fail_motricite_a():
+    result = scores(score(9, dots(dot_row((10, 66), (4.5, -4.5)), diameter=3.6)))
+    assert result["A"] == 0 and result["G"] == 1
+
+
+def test_item10_rectangle_is_not_an_isosceles_trapezoid():
+    image = polyline(canvas(), [(20, 42), (32, 20), (44, 42)])
+    polyline(image, [(14, 42), (50, 42), (50, 51), (14, 51)], closed=True)
+    result = scores(score(10, image))
+    assert result["E"] == 0 and result["G"] == 0 and result["C"] == 1 and result["D"] == 1
+
+
+def test_item10_tall_triangle_fails_local_f():
+    image = polyline(canvas(), [(24, 50), (32, 14), (40, 50)])
+    polyline(image, [(14, 50), (50, 50), (44, 59), (20, 59)], closed=True)
+    result = scores(score(10, image))
+    assert result["F"] == 0 and result["E"] == 1
+
+
+def test_item10_floating_triangle_and_off_center():
+    # Triangle fermé posé 4 mm au-dessus du trapèze : relié pour Global C
+    # (≤ 5 mm) mais pas pour le critère général (≤ 3 mm).
+    image = polyline(canvas(), [(20, 38), (32, 16), (44, 38)], closed=True)
+    polyline(image, [(14, 42), (50, 42), (44, 51), (20, 51)], closed=True)
+    floating = scores(score(10, image))
+    assert floating["G"] == 0 and floating["C"] == 1 and floating["B"] == 0
+    # Triangle décalé vers la droite : parties du haut de 2 et 10 mm.
+    image = polyline(canvas(), [(16, 42), (28, 20), (40, 42)])
+    polyline(image, [(14, 42), (50, 42), (44, 51), (20, 51)], closed=True)
+    shifted = score(10, image)
+    assert scores(shifted)["G"] == 0 and scores(shifted)["C"] == 1
+    assert shifted.measures["rapport_parties_haut"] > 1.5
+
+
+def test_item11_square_below_the_middle_fails_global_d():
+    image = polyline(canvas(), [(4, 24), (60, 24), (60, 64), (4, 64)], closed=True)
+    polyline(image, [(4, 48), (26, 48), (26, 24)])
+    result = scores(score(11, image))
+    assert result == {"G": 1, "A": 1, "B": 1, "C": 1, "D": 0, "E": 1, "F": 1}
+
+
+def test_item11_overshoot_fails_motricite_b():
+    image = polyline(canvas(), [(4, 24), (60, 24), (60, 64), (4, 64)], closed=True)
+    polyline(image, [(4, 43), (24, 43), (24, 19)])
+    result = scores(score(11, image))
+    assert result["B"] == 0 and result["G"] == 0 and result["D"] == 1
+
+
+def test_item11_tall_rectangle_fails_general():
+    image = polyline(canvas(), [(10, 20), (54, 20), (54, 66), (10, 66)], closed=True)
+    polyline(image, [(10, 42), (31, 42), (31, 20)])
+    result = scores(score(11, image))
+    assert result["G"] == 0 and result["E"] == 1 and result["F"] == 1
 
 
 def test_borderline_measure_is_flagged():

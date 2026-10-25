@@ -21,7 +21,8 @@ class Mark:
     # « angle » : arc au sommet ``points[0]`` entre ``points[1]`` et ``points[2]`` ;
     # « bande » : rectangle de la barre grisée (quatre coins) ;
     # « point » : point remarquable (jonction, intersection) ;
-    # « cercle » : cercle de centre ``points[0]`` et de rayon ``radius``.
+    # « cercle » : cercle de centre ``points[0]`` et de rayon ``radius`` ;
+    # « tache » : tache d'encre (contour), coloriée selon qu'elle convient ou non.
     kind: str
     points: list[np.ndarray]
     label: str
@@ -36,8 +37,12 @@ def cote(a, b, label: str, side=None) -> Mark:
     return Mark("cote", [np.asarray(a, float), np.asarray(b, float)], label, extra=extra)
 
 
-def segment(a, b, label: str) -> Mark:
-    return Mark("segment", [np.asarray(a, float), np.asarray(b, float)], label)
+def segment(a, b, label: str, side=None) -> Mark:
+    """Mesure tracée de ``a`` à ``b``. ``side`` : direction (vecteur) où poser
+    l'étiquette, depuis le milieu du segment ; par défaut, au bout le plus
+    éloigné du centre du dessin."""
+    extra = {} if side is None else {"side": np.asarray(side, float)}
+    return Mark("segment", [np.asarray(a, float), np.asarray(b, float)], label, extra=extra)
 
 
 def angle(vertex, p1, p2, label: str) -> Mark:
@@ -51,6 +56,15 @@ def point(p, label: str) -> Mark:
 
 def cercle(center, radius: float, label: str) -> Mark:
     return Mark("cercle", [np.asarray(center, float)], label, radius=radius)
+
+
+def tache(outline, label: str, ok: bool, side=None) -> Mark:
+    """Tache d'encre de contour ``outline``. ``side`` : direction (vecteur) où
+    poser l'étiquette, la même pour des taches alignées."""
+    extra = {"ok": ok}
+    if side is not None:
+        extra["side"] = np.asarray(side, float)
+    return Mark("tache", [np.asarray(p, float) for p in outline], label, extra=extra)
 
 
 def bande(line: StraightLine, label: str | None = None, at: str = "milieu") -> Mark:

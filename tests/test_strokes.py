@@ -4,7 +4,7 @@ import pytest
 from autocorrect_nepsy.ink import ink_mask, printed_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
-from synth import (DARK_BLUE_PEN, PENCIL, PRINT_BLACK, PX_PER_MM, canvas, circle_points,
+from synth import (DARK_BLUE_PEN, PENCIL, PRINT_BLACK, PX_PER_MM, canvas, circle_points, dot,
                    polyline)
 
 
@@ -97,3 +97,20 @@ def test_line_retraced_beside_itself_is_detected():
 def test_stroke_width_is_measured():
     image = polyline(canvas(), [(10, 40), (54, 40)], width_mm=0.8)
     assert drawing_of(image).stroke_width == pytest.approx(0.8, abs=0.25)
+
+
+def test_isolated_marks_are_measured():
+    image = canvas()
+    dot(image, (15, 20), 2.0)
+    polyline(image, circle_points((35, 20), 1.6), closed=True)
+    polyline(image, [(50, 20), (53, 20)])
+    dot(image, (15, 50), 0.7)  # simple point : trop petit pour un trait, gardé comme marque
+    drawing = drawing_of(image)
+    disk, ring, dash, speck = sorted(drawing.blobs, key=lambda b: (round(b.center[1] / 10), b.center[0]))
+    assert disk.diameter == pytest.approx(2.2, abs=0.35)  # liseré de l'encre compris
+    assert disk.solidity > 0.9 and disk.hole_fraction < 0.05
+    assert ring.hole_fraction > 0.2
+    assert dash.length == pytest.approx(3.5, abs=0.5) and dash.area / dash.length < 1.0
+    assert speck.length < 1.2
+    # Écart bord à bord : 20 mm entre centres, moins les deux rayons.
+    assert disk.distance_to(ring) == pytest.approx(20 - 1.0 - 1.85, abs=0.5)

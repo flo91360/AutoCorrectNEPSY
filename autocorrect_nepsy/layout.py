@@ -32,6 +32,11 @@ ITEMS_BY_PAGE = {
 ZONE_MARGIN_MM = 1.5
 # Trait de séparation plus court que cette part de la largeur : page 1 (en-tête).
 HEADER_SEPARATOR_FRACTION = 0.78
+# Un dessin des colonnes extrêmes peut dépasser le bout du trait de séparation :
+# leur zone de dessin est élargie vers le bord de la feuille, jusqu'à cette
+# distance (mm), en laissant une marge pour les ombres du bord du scan.
+OUTER_DRAWING_MM = 15.0
+PAGE_EDGE_MM = 3.0
 
 
 class LayoutError(ValueError):
@@ -113,10 +118,20 @@ class PreparedPage:
                 f"{len(self.columns)} zones trouvées alors que la page {page_number} "
                 f"du cahier contient {len(items)} items")
         margin = int(round(ZONE_MARGIN_MM * self.px_per_mm))
-        zones = [ItemZone(item,
-                          (x0 + margin, self.top + margin, x1 - margin, self.separator.pos - margin),
-                          (x0 + margin, self.separator.pos + margin, x1 - margin, self.bottom - margin))
-                 for item, (x0, x1) in zip(items, self.columns)]
+        outer = int(round(OUTER_DRAWING_MM * self.px_per_mm))
+        edge = int(round(PAGE_EDGE_MM * self.px_per_mm))
+        width = self.image.shape[1]
+        zones = []
+        for index, (item, (x0, x1)) in enumerate(zip(items, self.columns)):
+            left, right = x0 + margin, x1 - margin
+            if index == 0:
+                left = max(edge, x0 - outer)
+            # À droite de la page 1 se trouve l'en-tête (nom, date).
+            if index == len(items) - 1 and not self.has_header:
+                right = min(width - edge, x1 + outer)
+            zones.append(ItemZone(
+                item, (x0 + margin, self.top + margin, x1 - margin, self.separator.pos - margin),
+                (left, self.separator.pos + margin, right, self.bottom - margin)))
         return PageLayout(self.image, self.ink, self.px_per_mm, self.quarter_turns,
                           self.skew_deg, self.separator, zones)
 
