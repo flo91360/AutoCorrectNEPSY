@@ -1,5 +1,6 @@
 """Interface graphique pilotée par le code (nécessite un écran, réel ou virtuel)."""
 
+import os
 import time
 
 import cv2
@@ -8,7 +9,16 @@ from PIL import Image
 
 from synth import page
 
-tk = pytest.importorskip("tkinter")
+# En intégration continue, l'interface doit être testée : sans tkinter ou sans
+# écran, les tests échouent au lieu d'être ignorés en silence.
+REQUIRED = os.environ.get("AUTOCORRECT_TESTS_INTERFACE") == "obligatoires"
+
+try:
+    import tkinter as tk
+except ImportError:
+    if REQUIRED:
+        raise
+    pytest.skip("tkinter absent", allow_module_level=True)
 
 
 @pytest.fixture
@@ -18,6 +28,8 @@ def app():
     try:
         root = tk.Tk()
     except tk.TclError:
+        if REQUIRED:
+            raise
         pytest.skip("pas d'écran disponible")
     root.withdraw()
     yield App(root)
@@ -130,6 +142,35 @@ def test_wrong_page_and_resolution_are_flagged(app, scan):
     row.dpi_var.set("abc")
     assert "résolution" in app._row_problem(row)
     assert str(app.run_button.cget("state")) == "disabled"
+
+
+def test_guessed_page_of_a_lone_scan_is_to_confirm(app, scan):
+    from autocorrect_nepsy.pipeline import page_label
+
+    # Un scan seul à quatre items peut être la page 2, 3 ou 4 du cahier.
+    app.add_paths([scan])
+    wait(app, lambda: app.rows and not app.busy)
+    [row] = app.rows
+    assert row.guessed_page and "à confirmer" in str(row.status.cget("text"))
+    assert app._row_problem(row) is None  # signalée, mais pas bloquante
+
+    app.run_correction()
+    wait(app, lambda: app.correction is not None and not app.busy)
+    assert all(report.result.to_review for report in app.correction.items)
+
+    row.page_var.set(page_label(2))
+    app._page_chosen(row)
+    assert not row.guessed_page and "Prête" in str(row.status.cget("text"))
+
+
+def test_results_never_overwrite_a_previous_correction(tmp_path):
+    from autocorrect_nepsy.gui import results_folder
+
+    # Deux enfants corrigés dans la même minute, scans dans le même dossier.
+    first = results_folder(tmp_path / "enfant A.pdf")
+    first.mkdir()
+    second = results_folder(tmp_path / "enfant B.pdf")
+    assert second != first and second.parent == tmp_path and not second.exists()
 
 
 def test_icon_is_drawn():

@@ -21,7 +21,7 @@ from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
 from . import polygons
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from .ellipses import TOLERANCE_MM, Ellipse, coverage, crosses, find_ellipses, fit, tangents
 from .shapes import separate_extras
 
@@ -105,14 +105,16 @@ def score(drawing: Drawing, item: int = 21) -> ItemResult:
     checks = {code: Checks() for code in codes}
     measures: dict[str, float] = {}
     marks: list = []
+    notes: list[str] = []
 
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     found = _wheel_ellipses(drawing)
     if found is None:
-        for code in codes:
-            checks[code].fail("roues non reconnues (deux cercles qui se chevauchent)")
+        not_recognized(checks, codes, "roues non reconnues (deux cercles qui se chevauchent)",
+                       notes)
         return result()
     (left_e, right_e), extra_wheels = found
     left, right = _wheels(drawing, left_e, right_e)

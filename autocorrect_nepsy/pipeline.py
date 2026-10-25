@@ -9,7 +9,8 @@ from typing import Callable
 import numpy as np
 
 from .criteria import SUPPORTED_ITEMS, ItemResult, score_item
-from .layout import ITEMS_BY_PAGE, PreparedPage, guess_page_numbers, prepare_page
+from .layout import (ITEMS_BY_PAGE, PreparedPage, guess_page_numbers, prepare_page,
+                     uncertain_guesses)
 from .scan import MM_PAR_POUCE, ScannedPage, load_pages
 from .strokes import Drawing, extract_drawing
 
@@ -46,6 +47,7 @@ class PageInput:
     scan: ScannedPage
     number: int
     prepared: PreparedPage | None = None  # déjà redressée et orientée (même encre)
+    guessed: bool = False  # numéro deviné sans certitude (voir uncertain_guesses)
 
 
 def page_label(number: int) -> str:
@@ -65,19 +67,26 @@ def correct_pages(inputs: list[PageInput], ink: str = "bleu",
         prepared = replace(prepared, px_per_mm=page.scan.dpi / MM_PAR_POUCE * prepared.scale)
         layout = prepared.layout(page.number)
         correction.pages.append((page.scan.source, page.number))
+        # Doutes qui touchent toute la page : chacun de ses items est à vérifier.
+        doubts = []
+        if page.guessed:
+            doubts.append(f"page du cahier devinée ({page_label(page.number)}), à confirmer : "
+                          "une page manquante ou un scan seul rend le numéro incertain")
         separator_mm = layout.separator.length / layout.px_per_mm
         expected = SEPARATOR_MM.get(page.number, SEPARATOR_DEFAULT_MM)
         if abs(separator_mm - expected) > SEPARATOR_TOLERANCE * expected:
-            correction.warnings.append(
-                f"{page.scan.source} : échelle douteuse (trait de séparation de "
-                f"{separator_mm:.0f} mm), vérifier la résolution du scan ({page.scan.dpi:.0f} dpi)")
+            doubts.append(f"échelle douteuse (trait de séparation de {separator_mm:.0f} mm), "
+                          f"vérifier la résolution du scan ({page.scan.dpi:.0f} dpi)")
+        correction.warnings.extend(f"{page.scan.source} : {doubt}" for doubt in doubts)
         for zone in layout.zones:
             if zone.item not in SUPPORTED_ITEMS:
                 continue
             drawing = extract_drawing(layout.drawing_ink(zone.item), layout.px_per_mm)
+            result = score_item(zone.item, drawing)
+            result.notes.extend(doubts)
             x0, y0, x1, y1 = zone.drawing_box
             correction.items.append(ItemReport(
-                zone.item, page.number, page.scan.source, score_item(zone.item, drawing), drawing,
+                zone.item, page.number, page.scan.source, result, drawing,
                 layout.image[y0:y1, x0:x1].copy(), layout.px_per_mm))
     if progress:
         progress(len(inputs), len(inputs), "")
@@ -90,11 +99,17 @@ def correct(files: list[str | Path], pages: list[int] | None = None, ink: str = 
     """Corrige des fichiers scannés.
 
     ``pages`` donne le numéro de page du cahier (1 à 6) de chaque page scannée,
-    dans l'ordre ; à défaut, il est déduit de la structure des pages.
+    dans l'ordre ; à défaut, il est déduit de la structure des pages, à condition
+    qu'il soit sûr (voir ``uncertain_guesses``).
     """
     scanned = [page for path in files for page in load_pages(path, dpi)]
     prepared = [prepare_page(page, ink) for page in scanned]
     numbers = pages or guess_page_numbers(prepared)
+    unsure = set() if pages else uncertain_guesses(prepared)
+    if unsure:
+        sources = ", ".join(scanned[index].source for index in sorted(unsure))
+        raise ValueError(f"numéro de page du cahier incertain pour {sources} (page manquante ou "
+                         "scan seul) : préciser le numéro de page de chaque scan avec --pages")
     if len(numbers) != len(scanned):
         raise ValueError(f"{len(scanned)} page(s) scannée(s) mais {len(numbers)} numéro(s) de page")
     return correct_pages([PageInput(scan, number, prep)

@@ -17,7 +17,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import STEP_MM, Drawing, StraightLine
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from .shapes import EXTRA_ELEMENT_MM
 
 WOBBLE_MM = 0.8  # amplitude d'une ondulation de la main (Motricité A)
@@ -59,13 +59,14 @@ def score(drawing: Drawing, item: int = 14) -> ItemResult:
     checks = {code: Checks() for code in codes}
     measures: dict[str, float] = {}
     marks: list = []
+    notes: list[str] = []
 
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     def fail(reason: str, *failing: str) -> ItemResult:
-        for code in failing:
-            checks[code].fail(reason)
+        not_recognized(checks, failing, reason, notes)
         return result()
 
     points = drawing.points

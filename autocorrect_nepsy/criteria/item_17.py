@@ -16,7 +16,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from .polygons import (EDGE_OFFSET_MM, Polygon, away_from, corner_polygon, fit_polygon,
                        overshoot, raster, regions, silhouette, turn, wavy_changes)
 from .shapes import EXTRA_ELEMENT_MM
@@ -72,9 +72,11 @@ def score(drawing: Drawing, item: int = 17) -> ItemResult:
     checks = {code: Checks() for code in codes}
     measures: dict[str, float] = {}
     marks: list = []
+    notes: list[str] = []
 
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     lines = drawing.significant_lines()
     changes = wavy_changes(line.direction_changes for line in lines)
@@ -85,8 +87,7 @@ def score(drawing: Drawing, item: int = 17) -> ItemResult:
     found = _v_regions(closed)
     if found is None:
         reason = "figure en V non reconnue (un triangle en bas et un trapèze de chaque côté)"
-        for code in ("G", "B", "C", "D", "E", "F"):
-            checks[code].fail(reason)
+        not_recognized(checks, ("G", "B", "C", "D", "E", "F"), reason, notes)
         return result()
     triangle, left, right = found
     t = triangle.vertices

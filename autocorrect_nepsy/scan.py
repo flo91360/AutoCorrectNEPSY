@@ -7,8 +7,9 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageSequence, UnidentifiedImageError
 from pypdf import PdfReader
+from pypdf.errors import PyPdfError
 
 MM_PAR_POUCE = 25.4
 
@@ -27,16 +28,24 @@ class ScannedPage:
 
 
 def load_pages(path: str | Path, dpi: float | None = None) -> list[ScannedPage]:
-    """Charge toutes les pages d'un fichier (PDF multi-pages ou image).
+    """Charge toutes les pages d'un fichier (PDF ou image, multipage ou non).
 
     Pour un PDF, la résolution est déduite de la taille de l'image scannée
     par rapport à la taille de la page. Pour une image, elle est lue dans les
-    métadonnées, ou doit être fournie avec ``dpi``.
+    métadonnées, ou doit être fournie avec ``dpi``. Un fichier absent ou
+    illisible lève ``ValueError`` avec un message lisible.
     """
     path = Path(path)
-    if path.suffix.lower() == ".pdf":
-        return _load_pdf(path, dpi)
-    return [_load_image(path, dpi)]
+    if not path.is_file():
+        raise ValueError(f"{path} : fichier introuvable")
+    try:
+        if path.suffix.lower() == ".pdf":
+            return _load_pdf(path, dpi)
+        return _load_images(path, dpi)
+    except PyPdfError as error:
+        raise ValueError(f"{path.name} : PDF illisible ({error})") from error
+    except UnidentifiedImageError as error:
+        raise ValueError(f"{path.name} : ni un PDF ni une image lisible") from error
 
 
 def _load_pdf(path: Path, dpi: float | None) -> list[ScannedPage]:
@@ -55,11 +64,18 @@ def _load_pdf(path: Path, dpi: float | None) -> list[ScannedPage]:
     return pages
 
 
-def _load_image(path: Path, dpi: float | None) -> ScannedPage:
+def _load_images(path: Path, dpi: float | None) -> list[ScannedPage]:
+    """Toutes les pages d'une image : un TIFF peut en contenir plusieurs."""
+    pages = []
     with Image.open(path) as pil:
-        if dpi is None and "dpi" in pil.info:
-            dpi = float(pil.info["dpi"][0])
-        bgr = cv2.cvtColor(np.asarray(pil.convert("RGB")), cv2.COLOR_RGB2BGR)
-    if not dpi:
-        raise ValueError(f"{path} : résolution inconnue, préciser --dpi")
-    return ScannedPage(bgr, dpi, path.name)
+        count = getattr(pil, "n_frames", 1)
+        for index, frame in enumerate(ImageSequence.Iterator(pil), start=1):
+            page_dpi = dpi
+            if page_dpi is None and "dpi" in frame.info:
+                page_dpi = float(frame.info["dpi"][0])
+            if not page_dpi:
+                raise ValueError(f"{path} : résolution inconnue, préciser --dpi")
+            bgr = cv2.cvtColor(np.asarray(frame.convert("RGB")), cv2.COLOR_RGB2BGR)
+            source = path.name if count == 1 else f"{path.name} p{index}"
+            pages.append(ScannedPage(bgr, page_dpi, source))
+    return pages

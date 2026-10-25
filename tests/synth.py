@@ -207,6 +207,23 @@ def circle_points(center, radius: float, start_deg: float = 0, sweep_deg: float 
     return np.column_stack([center[0] + radius * np.cos(angles), center[1] + ry * np.sin(angles)])
 
 
+def rounded_rectangle(x0: float, y0: float, x1: float, y1: float, radius: float) -> np.ndarray:
+    """Contour d'un rectangle aux coins arrondis (quart de cercle de ``radius`` mm)."""
+    arcs = []
+    for (cx, cy), start in zip([(x1 - radius, y0 + radius), (x1 - radius, y1 - radius),
+                                (x0 + radius, y1 - radius), (x0 + radius, y0 + radius)],
+                               (-90, 0, 90, 180)):
+        angles = np.radians(np.linspace(start, start + 90, 20))
+        arcs.append(np.column_stack([cx + radius * np.cos(angles), cy + radius * np.sin(angles)]))
+    return np.vstack(arcs)
+
+
+def zigzag(x: float, top: float, bottom: float, amplitude: float, step: float = 5.0) -> np.ndarray:
+    """Trait vertical tracé en zigzag de ± ``amplitude`` mm."""
+    ys = np.arange(top, bottom + 1e-9, step)
+    return np.column_stack([x + amplitude * (-1) ** np.arange(1, len(ys) + 1), ys])
+
+
 def draw_model(item: int, image: np.ndarray, color=BLUE_PEN, wobble: float = 0.0,
                ppm: float = PX_PER_MM, offset=(0.0, 0.0)) -> np.ndarray:
     """Copie fidèle du modèle de l'item, centrée dans une zone de 64 x 88 mm."""

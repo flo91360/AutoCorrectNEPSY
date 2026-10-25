@@ -15,7 +15,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from .polygons import (EDGE_OFFSET_MM, away_from, overshoot, polygon, raster, silhouette,
                        simplify, wavy_changes)
 from .shapes import EXTRA_ELEMENT_MM
@@ -42,16 +42,17 @@ def score(drawing: Drawing, item: int = 18) -> ItemResult:
     checks = {code: Checks() for code in codes}
     measures: dict[str, float] = {}
     marks: list = []
+    notes: list[str] = []
 
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     outline = silhouette(drawing)
     found = None if outline is None else _stairs(outline)
     if found is None:
         reason = "escalier non reconnu (paliers et contremarches entre le haut à gauche et le bas à droite)"
-        for code in codes:
-            checks[code].fail(reason)
+        not_recognized(checks, codes, reason, notes)
         return result()
     poly, tl, br, bl = found
     v = poly.vertices

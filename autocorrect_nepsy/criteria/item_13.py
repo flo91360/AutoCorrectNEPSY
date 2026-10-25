@@ -13,7 +13,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing, StraightLine
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from .shapes import check_lines, extra_elements, intersection, review_notes
 
 STRAIGHT_BAND_MM = 2.0  # Motricité A : barre grisée de 2 mm
@@ -51,8 +51,7 @@ def score(drawing: Drawing, item: int = 13) -> ItemResult:
 
     def fail(reason: str) -> ItemResult:
         _check_straight(checks["A"], marks, lines, None)
-        for code in ("G", "B", "C", "D", "E", "F"):
-            checks[code].fail(reason)
+        not_recognized(checks, ("G", "B", "C", "D", "E", "F"), reason, notes)
         return result()
 
     flat = [l for l in lines if l.angle_to_horizontal() <= BASE_MAX_DEG]

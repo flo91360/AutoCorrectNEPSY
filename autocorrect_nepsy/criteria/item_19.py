@@ -18,7 +18,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import STEP_MM, Drawing, StraightLine
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from .ellipses import Ellipse, concentric, crosses, find_ellipses, straightest, tangents
 from .shapes import EXTRA_ELEMENT_MM, separate_extras
 
@@ -49,15 +49,16 @@ def score(drawing: Drawing, item: int = 19) -> ItemResult:
     checks = {code: Checks() for code in codes}
     measures: dict[str, float] = {}
     marks: list = []
+    notes: list[str] = []
 
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     found = _bucket(drawing)
     if found is None:
         reason = "cylindre non reconnu (deux ellipses concentriques au-dessus d'une ellipse de base)"
-        for code in codes:
-            checks[code].fail(reason)
+        not_recognized(checks, codes, reason, notes)
         return result()
     outer, inner, base = found
     ellipses = {"supérieure externe": outer, "supérieure interne": inner, "de base": base}

@@ -19,7 +19,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing, StraightLine
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from .shapes import (check_lines, dangling_tail, end_at, extra_elements, intersection,
                      review_notes)
 
@@ -63,8 +63,7 @@ def score(drawing: Drawing, item: int = 10) -> ItemResult:
                           marks)
 
     def fail(reason: str) -> ItemResult:
-        for code in ("G", "B", "C", "D", "E", "F"):
-            checks[code].fail(reason)
+        not_recognized(checks, ("G", "B", "C", "D", "E", "F"), reason, notes)
         return result()
 
     sides = _triangle_sides(lines)

@@ -9,7 +9,7 @@ import numpy as np
 
 from .. import geometry as geo
 from ..strokes import Drawing
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from . import marks as mk
 from .shapes import (check_direction_changes, check_lines, end_at, extra_elements,
                      intersection, review_notes)
@@ -45,8 +45,7 @@ def score(drawing: Drawing, item: int = 6) -> ItemResult:
     apex = intersection(lines[0], lines[1]) if len(lines) >= 2 else None
     if apex is None:
         reason = "il faut deux lignes qui convergent"
-        for code in ("G", "A", "C", "D", "E", "F"):
-            checks[code].fail(reason)
+        not_recognized(checks, ("G", "A", "C", "D", "E", "F"), reason, notes)
         return result()
 
     left, right = sorted(lines[:2], key=lambda l: l.center[0])

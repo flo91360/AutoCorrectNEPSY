@@ -9,7 +9,7 @@ import numpy as np
 
 from .. import geometry as geo
 from ..strokes import Drawing, StraightLine
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from . import marks as mk
 from .shapes import (check_direction_changes, check_lines, extra_elements, intersection,
                      outside, review_notes)
@@ -62,16 +62,15 @@ def score(drawing: Drawing, item: int = 7) -> ItemResult:
     if not horizontals or len(verticals) < 2:
         reason = (f"figure non reconnue : {len(horizontals)} ligne(s) horizontale(s), "
                   f"{len(verticals)} verticale(s) (il en faut 1 et 2)")
-        for code in ("G", "C", "D", "F"):
-            checks[code].fail(reason)
+        not_recognized(checks, ("G", "C", "D", "F"), reason, notes)
         return result()
 
     horizontal = horizontals[0]
     v_left, v_right = sorted(verticals[:2], key=lambda l: l.center[0])
     crossings = [intersection(horizontal, v) for v in (v_left, v_right)]
     if any(p is None for p in crossings):
-        for code in ("G", "C", "D", "F"):
-            checks[code].fail("lignes parallèles : pas d'intersection")
+        not_recognized(checks, ("G", "C", "D", "F"), "lignes parallèles : pas d'intersection",
+                       notes)
         return result()
 
     crosses = all(outside(horizontal, p) <= CROSSING_TOLERANCE_MM

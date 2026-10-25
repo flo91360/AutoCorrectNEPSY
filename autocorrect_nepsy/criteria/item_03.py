@@ -6,7 +6,7 @@ Seuils repris du manuel NEPSY-II (Copie de figures), reformulés.
 from __future__ import annotations
 
 from ..strokes import Drawing
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, unrecognized_note
 from . import marks as mk
 from .shapes import STRAIGHT_MARGIN_MM, circle_metrics, circular_strokes
 
@@ -57,5 +57,6 @@ def score(drawing: Drawing, item: int = 3) -> ItemResult:
         measures={"grand_diametre_mm": m.long_diameter, "petit_diametre_mm": m.short_diameter,
                   "intervalle_mm": m.gap, "depassement_mm": m.overshoot,
                   "section_droite_max_mm": m.longest_straight},
+        notes=[] if circles else [unrecognized_note("forme circulaire non reconnue")],
         marks=marks,
     )

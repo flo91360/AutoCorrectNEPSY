@@ -81,12 +81,18 @@ jobs:
       - name: Écran virtuel pour les tests de l'interface
         if: runner.os == 'Linux'
         run: sudo apt-get install -y -q xvfb
+      # Les tests de l'interface échouent (au lieu d'être ignorés) sans tkinter
+      # ou sans écran ; -rs affiche les tests ignorés.
       - name: Tests (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a python -m pytest -q
+        env:
+          AUTOCORRECT_TESTS_INTERFACE: obligatoires
+        run: xvfb-run -a python -m pytest -q -rs
       - name: Tests (Windows)
         if: runner.os == 'Windows'
-        run: python -m pytest -q
+        env:
+          AUTOCORRECT_TESTS_INTERFACE: obligatoires
+        run: python -m pytest -q -rs
 
   exe:
     name: Exécutable Windows
@@ -111,10 +117,18 @@ jobs:
         shell: pwsh
         run: |
           python packaging/sample_scan.py exemple.pdf
-          $p = Start-Process -FilePath dist\AutoCorrectNEPSY.exe -ArgumentList 'corriger','exemple.pdf','-o','sortie' -Wait -PassThru
+          $p = Start-Process -FilePath dist\AutoCorrectNEPSY.exe -ArgumentList 'corriger','exemple.pdf','--pages','2','-o','sortie' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "correction en ligne de commande : code $($p.ExitCode)" }
           if (-not (Test-Path sortie\cotation.csv)) { throw "cotation.csv absent" }
           Get-Content sortie\cotation.csv
+          # Copies fidèles des modèles de la page 2 : 2 points par processus et par item.
+          $rows = @(Import-Csv sortie\cotation.csv)
+          if (($rows.item -join ',') -ne '4,5,6,7') { throw "items inattendus : $($rows.item -join ',')" }
+          foreach ($row in $rows) {
+            foreach ($total in 'motricite_total', 'global_total', 'local_total') {
+              if ($row.$total -ne '2') { throw "item $($row.item) : $total = $($row.$total), 2 attendu" }
+            }
+          }
           $p = Start-Process -FilePath dist\AutoCorrectNEPSY.exe -ArgumentList '--test-interface','exemple.pdf' -Wait -PassThru
           if ($p.ExitCode -ne 0) {
             Get-Content test-interface-erreur.txt -ErrorAction SilentlyContinue

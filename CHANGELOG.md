@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.8.0] - 2026-10-25
+
+- Items signalés « à vérifier » quand la figure du modèle n'est pas retrouvée (coins arrondis, dessin mal lu), quand la page du cahier est devinée sans certitude (page manquante, scan seul) ou quand l'échelle du scan est douteuse ; en ligne de commande, --pages est demandé si le numéro de page est incertain
+- Toutes les pages d'un TIFF multipage sont lues ; la comparaison accepte les CSV enregistrés par Excel ; fichiers absents ou illisibles signalés par un message clair ; un dossier de résultats n'est jamais écrasé
+
 ## [0.7.2] - 2026-10-25
 
 - Item 10 : le coin du triangle est pris là où un autre trait touche son côté, même si le côté se prolonge un peu au-delà (même cotation à 200 et 300 dpi)

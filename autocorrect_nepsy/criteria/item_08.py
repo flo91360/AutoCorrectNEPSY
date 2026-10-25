@@ -11,7 +11,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from .shapes import (STRAIGHT_MARGIN_MM, CircleMetrics, circle_metrics, circular_strokes,
                      filled_mask)
 
@@ -36,6 +36,7 @@ def score(drawing: Drawing, item: int = 8) -> ItemResult:
     marks = [mk.segment(*m.long_ends, f"Ø {fmt(m.long_diameter)}") for m in metrics]
     checks = {code: Checks() for code in codes}
     measures: dict[str, float] = {"nombre_cercles": len(circles)}
+    notes: list[str] = []
 
     for i, m in enumerate(metrics, start=1):
         checks["A"].limit(m.longest_straight, f"cercle {i} : section droite "
@@ -49,10 +50,9 @@ def score(drawing: Drawing, item: int = 8) -> ItemResult:
 
     if len(circles) < 2:
         reason = f"{len(circles)} figure(s) circulaire(s) reconnue(s), il en faut 3"
-        for code in ("G", "C", "D", "E", "F"):
-            checks[code].fail(reason)
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures,
-                          marks=marks)
+        not_recognized(checks, ("G", "C", "D", "E", "F"), reason, notes)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     order = np.argsort([m.center[1] for m in metrics])
     circles = [circles[i] for i in order]
@@ -116,7 +116,7 @@ def score(drawing: Drawing, item: int = 8) -> ItemResult:
     checks["F"].limit(worst, f"rapport des diamètres d'un même cercle {fmt_ratio(worst)} ≤ 1,5:1",
                       high=LOCAL_MAX_OWN_RATIO, unit="ratio")
 
-    return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
+    return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes, marks)
 
 
 def _cross_ratio(metrics: list[CircleMetrics]) -> float:
