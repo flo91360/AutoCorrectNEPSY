@@ -90,54 +90,6 @@ def split_line(line: StraightLine, points: list[np.ndarray],
     return parts
 
 
-OUTLINE_GAP_MM = 3.0  # interruption recousue pour retrouver une figure fermée
-OUTLINE_PX_PER_MM = 8.0
-
-
-def closed_outline(drawing: Drawing) -> np.ndarray | None:
-    """Contour (mm, sens des aiguilles d'une montre à l'écran) de la plus
-    grande figure fermée que forment les traits, petites interruptions
-    recousues. Le contour suit le milieu du trait."""
-    strokes = [st for st in drawing.strokes if len(st.points) >= 2]
-    if not strokes:
-        return None
-    k = OUTLINE_PX_PER_MM
-    origin = drawing.points.min(axis=0) - 2.0
-    size = drawing.points.max(axis=0) - origin + 2.0
-    mask = np.zeros((int(size[1] * k) + 1, int(size[0] * k) + 1), np.uint8)
-
-    def px(points: np.ndarray) -> np.ndarray:
-        return np.round((points - origin) * k).astype(np.int32)
-
-    for stroke in strokes:
-        cv2.polylines(mask, [px(stroke.points)], stroke.closed, 1, 2)
-    # Chaque bout de trait est relié au point d'encre le plus proche (d'un
-    # autre trait, ou du même trait plus loin) s'il est à moins de 3 mm.
-    for k_, stroke in enumerate(strokes):
-        if stroke.closed:
-            continue
-        for end, own in ((stroke.points[0], stroke.points[10:]),
-                         (stroke.points[-1], stroke.points[:-10])):
-            others = [st.points for j, st in enumerate(strokes) if j != k_] + [own]
-            others = np.vstack([o for o in others if len(o)]) if any(len(o) for o in others) \
-                else np.zeros((0, 2))
-            if not len(others):
-                continue
-            dist = np.linalg.norm(others - end, axis=1)
-            i = int(np.argmin(dist))
-            if 0.3 < dist[i] <= OUTLINE_GAP_MM:
-                cv2.line(mask, tuple(px(end[None])[0]), tuple(px(others[i][None])[0]), 1, 2)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    if not contours:
-        return None
-    largest = max(contours, key=cv2.contourArea)
-    outline = largest.reshape(-1, 2).astype(float) / k + origin
-    x, y = outline[:, 0], outline[:, 1]
-    if float(np.dot(x, np.roll(y, -1)) - np.dot(np.roll(x, -1), y)) < 0:
-        outline = outline[::-1]
-    return outline
-
-
 def dangling_tail(drawing: Drawing, figure: list[StraightLine], point: np.ndarray) -> float:
     """Longueur (mm) du plus long bout de trait libre qui part de ``point`` :
     un petit trait hors de la figure, accroché à cette jonction par un bout et

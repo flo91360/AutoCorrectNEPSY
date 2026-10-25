@@ -97,6 +97,42 @@ def cross_points(center, half_width: float = 6.0, arm: float = 11.0, arms=None):
             (x - w - left, y - w), (x - w, y - w)]
 
 
+def nested_triangles(apex, width: float = 35.5, height: float = 35.5, small_shift=(0.0, 0.0)):
+    """Item 16 : grand triangle, triangle moyen inversé (milieux des côtés),
+    petit triangle (milieux des côtés du moyen, décalé de ``small_shift``)
+    et lignes des coins du grand aux coins du petit."""
+    a = np.asarray(apex, float)
+    bl, br = a + (-width / 2, height), a + (width / 2, height)
+    m1, m2, m3 = (a + bl) / 2, (a + br) / 2, (bl + br) / 2
+    shift = np.asarray(small_shift, float)
+    s1, s2, s3 = (m1 + m2) / 2 + shift, (m1 + m3) / 2 + shift, (m2 + m3) / 2 + shift
+    return [[a, bl, br], [m1, m2, m3], [s1, s2, s3], [a, s1], [bl, s2], [br, s3]]
+
+
+def v_shape(bottom_center, top: float = 18.0, base: float = 18.0, height: float = 31.0,
+            width: float = 55.4, tilt: float = 0.0):
+    """Les deux parallélogrammes de l'item 17, qui se croisent au-dessus de la
+    base du V (centre de la base ``bottom_center``). ``tilt`` : pente (mm)
+    des côtés horizontaux du haut, vers le bas à l'extérieur."""
+    x, y = bottom_center
+    b0, b1 = x - base / 2, x + base / 2
+    left = [(x - width / 2, y - height + tilt), (x - width / 2 + top, y - height), (b1, y), (b0, y)]
+    right = [(x + width / 2 - top, y - height), (x + width / 2, y - height + tilt), (b1, y), (b0, y)]
+    return left, right
+
+
+def stairs_points(top_left, step: float = 12.3, steps: int = 4, heights=None):
+    """Contour de l'escalier de l'item 18 (``heights`` : hauteur de chaque
+    marche, de haut en bas)."""
+    x, y = top_left
+    heights = heights or [step] * steps
+    points = [(x, y)]
+    for i, h in enumerate(heights):
+        points += [(x + (i + 1) * step, y), (x + (i + 1) * step, y + h)]
+        y += h
+    return points + [(x, y)]
+
+
 def circle_points(center, radius: float, start_deg: float = 0, sweep_deg: float = 360,
                   ry: float | None = None) -> np.ndarray:
     angles = np.radians(np.linspace(start_deg, start_deg + sweep_deg, 240))
@@ -158,6 +194,16 @@ def draw_model(item: int, image: np.ndarray, color=BLUE_PEN, wobble: float = 0.0
     elif item == 15:
         # Côtés de 11 et 12 mm comparés à 1,2:1 près : tremblement plus faible.
         draw(cross_points((32, 44)), closed=True, wobble=wobble * 0.6)
+    elif item == 16:
+        # Figure dense (côtés de 10 à 18 mm) : tremblement d'une copie fidèle plus faible.
+        for i, points in enumerate(nested_triangles((32, 26))):
+            draw(points, closed=len(points) == 3, seed=i, wobble=wobble * 0.6)
+    elif item == 17:
+        left, right = v_shape((32, 57))
+        draw(left, closed=True)
+        draw(right, closed=True, seed=1)
+    elif item == 18:
+        draw(stairs_points((7.5, 20)), closed=True)
     else:
         raise ValueError(item)
     return image

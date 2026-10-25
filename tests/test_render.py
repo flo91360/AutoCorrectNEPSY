@@ -28,6 +28,9 @@ EXPECTED_MARKS = {
     13: {"bande": 8, "cote": 1, "segment": 7},
     14: {"bande": 2, "segment": 1, "point": 1, "cote": 1},
     15: {"trace": 1, "segment": 2, "point": 1},
+    16: {"trace": 3, "segment": 3},
+    17: {"trace": 3, "angle": 1, "cote": 1, "segment": 2},
+    18: {"trace": 1, "cote": 2, "segment": 4},
 }
 
 
@@ -37,7 +40,7 @@ def scored(item, image=None):
     return drawing, score_item(item, drawing)
 
 
-@pytest.mark.parametrize("item", range(1, 16))
+@pytest.mark.parametrize("item", range(1, 19))
 def test_each_item_marks_its_measures(item):
     _, result = scored(item)
     kinds = Counter(mark.kind for mark in result.marks)
@@ -64,7 +67,7 @@ def test_overlap_circle_sits_in_the_lens():
     assert all(mark.radius * 2 == pytest.approx(6.0, abs=0.6) for mark in lenses)
 
 
-@pytest.mark.parametrize("item", [3, 4, 7, 9, 12, 15])
+@pytest.mark.parametrize("item", [3, 4, 7, 9, 12, 15, 16, 18])
 def test_measured_image_is_drawn(item):
     drawing, result = scored(item)
     zone = canvas()

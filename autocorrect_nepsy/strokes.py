@@ -171,6 +171,19 @@ class Drawing:
     stroke_width: float
     component_sizes: list[float]
     blobs: list[Blob] = field(default_factory=list)  # taches isolées, petites comprises
+    ink: np.ndarray | None = None  # masque d'encre nettoyé (pixels de la zone)
+    px_per_mm: float = 0.0
+
+    def on_ink(self, points: np.ndarray) -> np.ndarray:
+        """Pour chaque point (mm), y a-t-il de l'encre ?"""
+        if self.ink is None:
+            return np.ones(len(points), bool)
+        px = np.round(np.asarray(points) * self.px_per_mm).astype(int)
+        h, w = self.ink.shape
+        inside = (px[:, 0] >= 0) & (px[:, 0] < w) & (px[:, 1] >= 0) & (px[:, 1] < h)
+        found = np.zeros(len(points), bool)
+        found[inside] = self.ink[px[inside, 1], px[inside, 0]] > 0
+        return found
 
     @property
     def is_empty(self) -> bool:
@@ -205,7 +218,7 @@ def extract_drawing(ink: np.ndarray, px_per_mm: float) -> Drawing:
     mask = _remove_dust(closed, px_per_mm)
     skeleton = skeletonize(mask.astype(bool))
     if not skeleton.any():
-        return Drawing([], 0.0, [], blobs)
+        return Drawing([], 0.0, [], blobs, mask, px_per_mm)
     stroke_width = float(mask.sum() / max(1, skeleton.sum())) / px_per_mm
     graph = _SkeletonGraph(skeleton, px_per_mm)
     strokes = [Stroke(geo.resample(points, STEP_MM, closed), closed)
@@ -216,7 +229,7 @@ def extract_drawing(ink: np.ndarray, px_per_mm: float) -> Drawing:
     for label in range(1, count):
         ys, xs = np.nonzero(labels == label)
         sizes.append(geo.max_diameter(np.column_stack([xs, ys]).astype(float)) / px_per_mm)
-    return Drawing(strokes, stroke_width, sorted(sizes, reverse=True), blobs)
+    return Drawing(strokes, stroke_width, sorted(sizes, reverse=True), blobs, mask, px_per_mm)
 
 
 def skeletonize(mask: np.ndarray) -> np.ndarray:
