@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from autocorrect_nepsy.criteria import score_item
+from autocorrect_nepsy.criteria import item_10, score_item
 from autocorrect_nepsy.ink import ink_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
@@ -203,6 +203,20 @@ def test_item10_floating_triangle_and_off_center():
     shifted = score(10, image)
     assert scores(shifted)["G"] == 0 and scores(shifted)["C"] == 1
     assert shifted.measures["rapport_parties_haut"] > 1.5
+
+
+@pytest.mark.parametrize("dpi", [200, 300])
+def test_item10_triangle_side_is_cut_where_another_stroke_touches_it(dpi):
+    # Le côté gauche se prolonge de 4 mm au-delà de l'endroit où un petit trait
+    # le touche : le coin du triangle est à cette jonction.
+    ppm = dpi / 25.4
+    image = polyline(canvas(ppm=ppm), [(32, 20), (20, 42), (17.5, 45.1)], ppm=ppm)
+    polyline(image, [(20.3, 41.6), (26, 41)], ppm=ppm, seed=1)
+    drawing = extract_drawing(ink_mask(image), ppm)
+    side = max(drawing.significant_lines(), key=lambda line: line.length)
+    cut = item_10._cut_at_junction(side, drawing)
+    assert np.linalg.norm(item_10._bottom(side) - (20.3, 41.6)) > 3.0
+    assert np.linalg.norm(item_10._bottom(cut) - (20.3, 41.6)) < 1.0
 
 
 def test_item11_square_below_the_middle_fails_global_d():
