@@ -22,7 +22,8 @@ class Mark:
     # « bande » : rectangle de la barre grisée (quatre coins) ;
     # « point » : point remarquable (jonction, intersection) ;
     # « cercle » : cercle de centre ``points[0]`` et de rayon ``radius`` ;
-    # « tache » : tache d'encre (contour), coloriée selon qu'elle convient ou non.
+    # « tache » : tache d'encre (contour), coloriée selon qu'elle convient ou non ;
+    # « tracé » : ligne reconstituée par l'outil (points dans l'ordre), en couleur.
     kind: str
     points: list[np.ndarray]
     label: str
@@ -65,6 +66,12 @@ def tache(outline, label: str, ok: bool, side=None) -> Mark:
     if side is not None:
         extra["side"] = np.asarray(side, float)
     return Mark("tache", [np.asarray(p, float) for p in outline], label, extra=extra)
+
+
+def trace(points, label: str, color: int) -> Mark:
+    """Ligne telle que l'outil l'a reconstituée (couleur n° ``color``),
+    étiquette à son premier bout."""
+    return Mark("trace", [np.asarray(p, float) for p in points], label, extra={"color": color})
 
 
 def bande(line: StraightLine, label: str | None = None, at: str = "milieu") -> Mark:

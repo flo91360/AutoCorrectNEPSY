@@ -22,6 +22,7 @@ LABEL_SIZE = 13  # taille du texte affiché (px)
 STROKE_COLORS = [(220, 40, 40), (30, 150, 30), (20, 90, 200), (230, 140, 0),
                  (170, 40, 170), (0, 150, 150), (160, 60, 90)]
 LINE_COLOR = (150, 150, 150)
+TRACED_STROKE_COLOR = (200, 200, 200)
 MARK_COLOR = (30, 41, 59)
 BAND_COLOR = (148, 163, 184)
 BLOB_OK_COLOR = (30, 150, 30)  # tache qui convient (cercle plein)
@@ -103,12 +104,23 @@ def measured_image(zone_shape: tuple[int, int], px_per_mm: float, strokes, lines
         canvas.image = cv2.addWeighted(overlay, BAND_OPACITY, canvas.image, 1 - BAND_OPACITY, 0)
 
     thickness = max(2, int(round(max(stroke_width, 0.3) * k)))
+    # Lignes reconstituées par l'outil : les traits bruts restent dessous, en gris.
+    traced = any(m.kind == "trace" for m in marks)
     for i, stroke in enumerate(strokes):
         pts = np.array([canvas.px(p) for p in stroke.points], np.int32)
-        cv2.polylines(canvas.image, [pts], stroke.closed, _bgr(STROKE_COLORS[i % len(STROKE_COLORS)]),
-                      thickness, cv2.LINE_AA)
+        color = TRACED_STROKE_COLOR if traced else STROKE_COLORS[i % len(STROKE_COLORS)]
+        cv2.polylines(canvas.image, [pts], stroke.closed, _bgr(color), thickness, cv2.LINE_AA)
+    for mark in marks:
+        if mark.kind == "trace":
+            pts = np.array([canvas.px(p) for p in mark.points], np.int32)
+            color = STROKE_COLORS[mark.extra.get("color", 0) % len(STROKE_COLORS)]
+            cv2.polylines(canvas.image, [pts], False, _bgr(color), thickness, cv2.LINE_AA)
     for line in lines:
         canvas.line(*line.ends, LINE_COLOR, 1)
+    # Axe de chaque barre grisée : la droite ajustée sur le trait mesuré.
+    for mark in bands:
+        corners = mark.points
+        canvas.line((corners[0] + corners[3]) / 2, (corners[1] + corners[2]) / 2, LINE_COLOR, 1)
 
     for mark in marks:
         _DRAW[mark.kind](canvas, mark)
@@ -196,6 +208,12 @@ def _draw_blob(canvas: _Canvas, mark) -> None:
     canvas.label(mark.label, center + direction * reach, direction)
 
 
+def _draw_trace(canvas: _Canvas, mark) -> None:
+    """Le tracé est dessiné avec les traits ; ici, seulement son étiquette."""
+    start, after = mark.points[0], mark.points[min(10, len(mark.points) - 1)]
+    canvas.label(mark.label, start, start - after)
+
+
 def _draw_band(canvas: _Canvas, mark) -> None:
     """Étiquette au milieu de la bande, côté intérieur du dessin, ou au bout le
     plus éloigné du centre, pour qu'on voie à quel trait elle se rapporte."""
@@ -214,7 +232,7 @@ def _draw_band(canvas: _Canvas, mark) -> None:
 
 _DRAW = {"cote": _draw_cote, "segment": _draw_segment, "angle": _draw_angle,
          "point": _draw_point, "cercle": _draw_circle, "bande": _draw_band,
-         "tache": _draw_blob}
+         "tache": _draw_blob, "trace": _draw_trace}
 
 
 def _draw_labels(canvas: _Canvas) -> np.ndarray:

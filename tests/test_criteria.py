@@ -7,7 +7,8 @@ from autocorrect_nepsy.criteria import score_item
 from autocorrect_nepsy.ink import ink_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
-from synth import PX_PER_MM, canvas, circle_points, dot, dot_row, draw_model, polyline
+from synth import (PX_PER_MM, canvas, circle_points, cross_points, cylinder, dot, dot_row,
+                   draw_model, polyline, s_curve)
 
 
 def score(item, image):
@@ -18,7 +19,7 @@ def scores(result):
     return {code: c.score for code, c in result.criteria.items()}
 
 
-@pytest.mark.parametrize("item", range(1, 12))
+@pytest.mark.parametrize("item", range(1, 16))
 @pytest.mark.parametrize("wobble", [0.0, 0.5])
 def test_faithful_copy_gets_full_marks(item, wobble):
     result = score(item, draw_model(item, canvas(), wobble=wobble))
@@ -26,7 +27,9 @@ def test_faithful_copy_gets_full_marks(item, wobble):
 
 
 @pytest.mark.parametrize("item, codes", [(1, "GABCD"), (4, "GABCDEF"), (8, "GABCDEF"),
-                                         (9, "GABCDEF"), (10, "GABCDEF"), (11, "GABCDEF")])
+                                         (9, "GABCDEF"), (10, "GABCDEF"), (11, "GABCDEF"),
+                                         (12, "GABCDEF"), (13, "GABCDEF"), (14, "GABCDEF"),
+                                         (15, "GABCDEF")])
 def test_empty_zone_scores_zero_and_asks_review(item, codes):
     result = score(item, canvas())
     assert scores(result) == {c: 0 for c in codes}
@@ -218,6 +221,96 @@ def test_item11_tall_rectangle_fails_general():
     polyline(image, [(10, 42), (31, 42), (31, 20)])
     result = scores(score(11, image))
     assert result["G"] == 0 and result["E"] == 1 and result["F"] == 1
+
+
+def test_item12_tilted_and_long_lines():
+    image = canvas()
+    tilted = s_curve((32, 44))
+    angle = np.radians(25)
+    rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    polyline(image, (tilted - (32, 44)) @ rotation.T + (32, 44))
+    polyline(image, s_curve((32, 44), vertical=True))
+    result = scores(score(12, image))
+    assert result["C"] == 0 and result["E"] == 1 and result["A"] == 1
+    image = canvas()
+    polyline(image, s_curve((32, 44), half=27, bulge=9))
+    polyline(image, s_curve((32, 44), vertical=True))
+    long = scores(score(12, image))
+    assert long["F"] == 0 and long["E"] == 1
+
+
+def test_item12_reversed_s_fails_general():
+    image = canvas()
+    mirrored = s_curve((32, 44)) * (1, -1) + (0, 88)
+    polyline(image, mirrored)
+    polyline(image, s_curve((32, 44), vertical=True))
+    result = scores(score(12, image))
+    assert result["G"] == 0 and result["E"] == 1 and result["C"] == 1
+
+
+def fan(radials, length=25.0, base=(7, 57), y=58, center=32):
+    image = canvas()
+    polyline(image, [(base[0], y), (base[1], y)])
+    for i, (angle, size) in enumerate(radials):
+        a = np.radians(angle)
+        polyline(image, [(center, y), (center + size * np.cos(a), y - size * np.sin(a))], seed=i)
+    return image
+
+
+def test_item13_missing_radials_and_short_lines():
+    five = [(a, 25.0) for a in (30, 60, 90, 120, 150)]
+    result = scores(score(13, fan(five)))
+    assert result["C"] == 0 and result["G"] == 0 and result["D"] == 1 and result["E"] == 1
+    uneven = [(a, 25.0 if i % 2 else 12.0) for i, a in enumerate(np.arange(22.5, 180, 22.5))]
+    result = scores(score(13, fan(uneven)))
+    assert result["E"] == 0 and result["F"] == 0 and result["C"] == 1
+
+
+def test_item13_off_center_convergence_fails_general():
+    seven = [(a, 25.0) for a in np.arange(22.5, 180, 22.5)]
+    result = scores(score(13, fan(seven, center=14, base=(5, 59))))
+    assert result["G"] == 0 and result["D"] == 0 and result["C"] == 1
+
+
+def test_item14_straight_back_and_rising_cylinder():
+    image = canvas()
+    for points, closed, seed in cylinder((32, 44), back_depth=0.0):
+        polyline(image, points, closed=closed, seed=seed)
+    flat = scores(score(14, image))
+    assert flat["D"] == 0 and flat["G"] == 0 and flat["C"] == 1
+    image = canvas()
+    for points, closed, seed in cylinder((32, 44)):
+        polyline(image, np.asarray(points) * (1, -1) + (0, 88), closed=closed, seed=seed)
+    rising = scores(score(14, image))
+    assert rising["C"] == 0 and rising["G"] == 0
+
+
+def test_item14_round_front_and_one_side():
+    image = canvas()
+    for points, closed, seed in cylinder((32, 44), depth=9.3):
+        polyline(image, points, closed=closed, seed=seed)
+    round_front = scores(score(14, image))
+    assert round_front["F"] == 0 and round_front["C"] == 1
+    image = canvas()
+    for points, closed, seed in cylinder((32, 44))[:3]:
+        polyline(image, points, closed=closed, seed=seed)
+    one_side = scores(score(14, image))
+    assert one_side["E"] == 0
+
+
+def test_item15_plain_crossing_lines_are_not_a_cross():
+    image = polyline(canvas(), [(15, 44), (49, 44)])
+    polyline(image, [(32, 27), (32, 61)])
+    assert scores(score(15, image))["C"] == 0
+
+
+def test_item15_uneven_branches():
+    image = polyline(canvas(), cross_points((32, 44), arms=(11, 18, 11, 11)), closed=True)
+    result = scores(score(15, image))
+    assert result["D"] == 0 and result["E"] == 0 and result["G"] == 0 and result["C"] == 1
+    wide = polyline(canvas(), cross_points((32, 44), half_width=9, arm=8), closed=True)
+    result = scores(score(15, wide))
+    assert result["E"] == 0 and result["C"] == 1 and result["D"] == 1
 
 
 def test_borderline_measure_is_flagged():

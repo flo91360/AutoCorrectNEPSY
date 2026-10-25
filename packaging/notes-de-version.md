@@ -16,6 +16,6 @@ Les notes s'affichent dans la fenêtre. Les items surlignés sont à vérifier. 
 
 ## Contenu de cette version
 
-- Correction des items 1 à 11 du subtest Copie de figures (NEPSY-II), tous les critères (Général, Motricité, Global, Local).
+- Correction des items 1 à 15 du subtest Copie de figures (NEPSY-II), tous les critères (Général, Motricité, Global, Local).
 - Prototype : la cotation proposée doit être validée par l'ergothérapeute.
 - Tout est calculé sur l'ordinateur : aucun scan n'est envoyé sur Internet.
