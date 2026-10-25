@@ -9,7 +9,7 @@ import numpy as np
 
 from ..strokes import Drawing, StraightLine
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from .shapes import (check_lines, dangling_tail, end_at, extra_elements, intersection,
                      review_notes, split_line)
 
@@ -44,8 +44,7 @@ def score(drawing: Drawing, item: int = 11) -> ItemResult:
     def fail(reason: str) -> ItemResult:
         check_lines(checks["A"], lines, STRAIGHT_BAND_MM)
         marks.extend(mk.bande(line, at="bout") for line in lines)
-        for code in ("G", "B", "C", "D", "E", "F"):
-            checks[code].fail(reason)
+        not_recognized(checks, ("G", "B", "C", "D", "E", "F"), reason, notes)
         return result()
 
     rectangle = _rectangle(horizontals, verticals)

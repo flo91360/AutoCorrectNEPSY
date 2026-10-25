@@ -12,7 +12,9 @@ cotation que l'ergothérapeute valide.
 - Chaque critère est accompagné des mesures qui le justifient (longueurs en mm,
   angles, rapports).
 - Les items douteux sont signalés **« à vérifier »** : mesure proche d'un seuil,
-  trait repassé à côté du premier tracé, zone vide.
+  trait repassé à côté du premier tracé, zone vide, figure du modèle non
+  retrouvée dans le dessin (l'outil a pu mal le lire), page du cahier devinée
+  sans certitude, échelle du scan douteuse.
 - Premier essai sur un protocole réel : 124 critères sur 141 identiques à la
   cotation de l'ergothérapeute (kappa de Cohen 0,75).
 
@@ -28,8 +30,9 @@ cotation que l'ergothérapeute valide.
 3. Dans la fenêtre :
    - **Ajouter des scans…** : choisissez les pages scannées du cahier ;
    - vérifiez pour chaque scan la **page du cahier** proposée (devinée
-     automatiquement) et sa **résolution** en dpi (lue dans le fichier,
-     modifiable) ;
+     automatiquement ; « à confirmer » quand une page manque ou pour un scan
+     seul : choisissez-la alors dans la liste) et sa **résolution** en dpi
+     (lue dans le fichier, modifiable) ;
    - cliquez sur **Lancer la correction automatique**.
 4. Les notes s'affichent, les items à vérifier sont surlignés. Le rapport
    détaillé et le tableau des notes sont enregistrés dans un dossier
@@ -50,8 +53,8 @@ Lancer la fenêtre : `python -m autocorrect_nepsy` (ou `autocorrect-nepsy-gui`).
 
 ### Scanner les pages
 
-- Une page du cahier par page de PDF (ou par image), **en couleur**, à 200 ou
-  300 dpi, **en taille réelle**, sans redimensionner. Un scan plus fin est
+- Une page du cahier par page de PDF ou de TIFF (ou par image), **en couleur**,
+  à 200 ou 300 dpi, **en taille réelle**, sans redimensionner. Un scan plus fin est
   ramené à 200 dpi, la résolution de réglage de l'outil : il n'apporte rien de
   plus, et la cotation ne dépend pas de la résolution du scan.
 - Le sens du scan n'a pas d'importance, une légère inclinaison est corrigée.
@@ -69,7 +72,9 @@ Options :
 - `--pages 1,2,3` : numéro de page du cahier de chaque page scannée, dans
   l'ordre. Sans cette option, il est déduit des scans (la page 1 a un
   en-tête, les pages 2 à 4 ont quatre items, les pages 5 et 6 trois), en
-  supposant les scans dans l'ordre du cahier ; une page manquante est tolérée.
+  supposant les scans dans l'ordre du cahier. Ce n'est possible que si le
+  numéro est sûr : quand une page manque (les pages 2 à 4, comme 5 et 6, se
+  ressemblent) ou pour un scan seul, la commande s'arrête et demande `--pages`.
 - `--dpi 300` : impose la résolution si celle du fichier est fausse.
 - `--encre rouge` : couleur du stylo de l'enfant (bleu par défaut).
 
@@ -93,7 +98,9 @@ autocorrect-nepsy comparer correction/cotation.csv cotation_ergo.csv
 Affiche l'accord global, le kappa de Cohen, l'accord par critère et la liste
 des désaccords. Les deux fichiers ont les colonnes
 `item,general,motricite_A,motricite_B,motricite_total,global_C,global_D,global_total,local_E,local_F,local_total`
-(case vide pour un critère qui n'existe pas).
+(case vide pour un critère qui n'existe pas). Un tableau enregistré en CSV par
+Excel convient (séparateur point-virgule, encodage Windows) ; les lignes sans
+numéro d'item, comme une ligne de total, sont ignorées.
 
 ## Fonctionnement
 
@@ -141,6 +148,14 @@ partir du manuel et ne le remplacent pas.
   que l'ergothérapeute annote dans une autre couleur.
 - Un dessin qui déborde de sa zone n'est pas pris en compte en dehors de la
   zone.
+- Une figure aux coins très arrondis (carré de l'item 4 aux coins de plus de
+  3 à 4 mm de rayon, par exemple) peut ne pas être reconnue : l'item est alors
+  noté 0 et signalé « à vérifier ».
+- Aux items 1 et 2, seule la plus longue ligne droite est notée : un trait en
+  zigzag ou un trait en trop est signalé « à vérifier ».
+- Un petit gribouillis peut être pris pour une petite figure (cercle de
+  l'item 3, V de l'item 17, cylindre de l'item 14) et recevoir quelques points
+  sans être signalé.
 
 ## Développement
 
@@ -149,8 +164,9 @@ python -m pip install -e ".[test]"
 pytest
 ```
 
-Les tests de l'interface ont besoin d'un écran (sous Linux sans écran :
-`xvfb-run -a pytest`).
+Les tests de l'interface ont besoin de `tkinter` et d'un écran (sous Linux sans
+écran : `xvfb-run -a pytest`) ; sans eux, ils sont ignorés. En intégration
+continue, `AUTOCORRECT_TESTS_INTERFACE=obligatoires` les rend obligatoires.
 
 ### Construire l'exécutable
 

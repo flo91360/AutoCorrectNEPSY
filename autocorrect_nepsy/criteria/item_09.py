@@ -16,7 +16,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Blob, Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt
+from .base import Checks, ItemResult, empty_result, fmt, not_recognized
 
 POINT_MAX_MM = 1.2  # tache plus petite : simple point de stylo
 # Un tiret est allongé et fin (épaisseur moyenne d'un trait de stylo) ; un
@@ -78,9 +78,11 @@ def score(drawing: Drawing, item: int = 9) -> ItemResult:
         side = -side
     marks: list = [mk.tache(m.blob.outline, f"{SHORT_NAMES[m.kind]} {fmt(m.blob.diameter, '')}",
                             m.kind == FILLED, side) for m in row + off_row]
+    notes: list[str] = []
 
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     all_marks = row + off_row
     large = sum(m.blob.diameter > MOTOR_MAX_DIAMETER_MM for m in all_marks)
@@ -93,8 +95,7 @@ def score(drawing: Drawing, item: int = 9) -> ItemResult:
 
     if axis is None:
         reason = f"{len(row)} marque(s) alignée(s) : rangée non reconnue"
-        for code in ("G", "C", "D", "E", "F"):
-            checks[code].fail(reason)
+        not_recognized(checks, ("G", "C", "D", "E", "F"), reason, notes)
         return result()
 
     order = np.argsort([m.blob.center @ axis for m in row])

@@ -8,6 +8,7 @@ from PIL import Image
 
 from autocorrect_nepsy.cli import main
 from autocorrect_nepsy.compare import Pair, cohen_kappa, pair_scores, read_scores
+from autocorrect_nepsy.pipeline import page_label
 from autocorrect_nepsy.scan import load_pages
 
 from synth import page
@@ -45,9 +46,20 @@ def test_correct_command_writes_scores_and_report(scanned_pdf, tmp_path, capsys)
     assert "Accord global : 28/28" in capsys.readouterr().out
 
 
-def test_page_number_is_guessed_when_omitted(scanned_pdf, tmp_path, capsys):
-    assert main(["corriger", str(scanned_pdf), "-o", str(tmp_path)]) == 0
-    assert "Page 2 (items 4 à 7)" in capsys.readouterr().out
+def test_lone_scan_needs_its_page_number(scanned_pdf, tmp_path, capsys):
+    # Les pages 2 à 4 du cahier ont la même structure : un scan seul pourrait être
+    # l'une ou l'autre, le numéro n'est pas deviné.
+    assert main(["corriger", str(scanned_pdf), "-o", str(tmp_path)]) == 1
+    assert "--pages" in capsys.readouterr().err
+
+
+def test_page_numbers_are_guessed_when_certain(tmp_path, capsys):
+    path = tmp_path / "pages 2 à 4.pdf"
+    scan = Image.fromarray(cv2.cvtColor(page({0: 4, 1: 5, 2: 6, 3: 7}), cv2.COLOR_BGR2RGB))
+    scan.save(path, "PDF", resolution=DPI, save_all=True, append_images=[scan, scan])
+    assert main(["corriger", str(path), "-o", str(tmp_path / "sortie")]) == 0
+    out = capsys.readouterr().out
+    assert all(page_label(number) in out for number in (2, 3, 4))
 
 
 def test_bad_page_number_is_a_clean_error(scanned_pdf, tmp_path, capsys):
@@ -67,3 +79,42 @@ def test_read_scores_skips_empty_cells(tmp_path):
     path.write_text("item,general,motricite_A,local_E\n1,1,0,\n", encoding="utf-8")
     assert read_scores(path) == {1: {"G": 1, "A": 0}}
     assert len(pair_scores(read_scores(path), read_scores(path))) == 2
+
+
+def test_read_scores_accepts_csv_saved_by_excel(tmp_path):
+    expected = {4: {"G": 1, "A": 0, "E": 1}, 5: {"G": 0}}
+    plain = "item,general,motricite_A,local_E\n4,1,0,1\n5,0,,\nTotal,1,0,1\n"
+    # Excel en français : point-virgule, encodage Windows (« é » de la ligne de
+    # total), en-têtes retouchés à la main.
+    excel = plain.replace(",", ";").replace("Total", "Total général").replace("item", "Item ")
+    variants = {
+        "bom.csv": plain.encode("utf-8-sig"),
+        "point-virgule.csv": plain.replace(",", ";").encode("utf-8"),
+        "windows.csv": excel.encode("cp1252"),
+    }
+    for name, content in variants.items():
+        path = tmp_path / name
+        path.write_bytes(content)
+        assert read_scores(path) == expected, name
+
+
+def test_unusable_reference_is_a_clean_error(tmp_path, capsys):
+    auto = tmp_path / "auto.csv"
+    auto.write_text("item,general\n4,1\n", encoding="utf-8")
+    bad_header = tmp_path / "sans item.csv"
+    bad_header.write_text("numero,general\n4,1\n", encoding="utf-8")
+    bad_value = tmp_path / "note.csv"
+    bad_value.write_text("item,general\n4,2\n", encoding="utf-8")
+    for reference, message in ((bad_header, "colonne « item » absente"),
+                               (bad_value, "note « 2 » illisible"),
+                               (tmp_path / "absent.csv", "introuvable")):
+        assert main(["comparer", str(auto), str(reference)]) == 1
+        assert message in capsys.readouterr().err
+
+
+def test_missing_or_broken_scan_is_a_clean_error(tmp_path, capsys):
+    broken = tmp_path / "casse.pdf"
+    broken.write_bytes(b"%PDF-1.4 pas un vrai PDF")
+    for scan, message in ((tmp_path / "absent.pdf", "introuvable"), (broken, "PDF illisible")):
+        assert main(["corriger", str(scan), "--pages", "2", "-o", str(tmp_path / "sortie")]) == 1
+        assert message in capsys.readouterr().err

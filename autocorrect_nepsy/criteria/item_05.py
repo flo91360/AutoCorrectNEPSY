@@ -6,7 +6,7 @@ Seuils repris du manuel NEPSY-II (Copie de figures), reformulés.
 from __future__ import annotations
 
 from ..strokes import Drawing
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from . import marks as mk
 from .shapes import (check_lines, end_at, extra_elements, intersection, outside,
                      review_notes)
@@ -41,8 +41,7 @@ def score(drawing: Drawing, item: int = 5) -> ItemResult:
     junction = intersection(verticals[0], horizontals[0]) if verticals and horizontals else None
     if junction is None:
         reason = "il faut une ligne verticale et une ligne horizontale qui se rejoignent"
-        for code in ("G", "B", "C", "D", "E", "F"):
-            checks[code].fail(reason)
+        not_recognized(checks, ("G", "B", "C", "D", "E", "F"), reason, notes)
         return result()
 
     vertical, horizontal = verticals[0], horizontals[0]

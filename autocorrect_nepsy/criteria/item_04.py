@@ -9,7 +9,7 @@ import numpy as np
 
 from .. import geometry as geo
 from ..strokes import Drawing
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from . import marks as mk
 from .shapes import check_lines, end_at, extra_elements, intersection, review_notes
 
@@ -46,8 +46,7 @@ def score(drawing: Drawing, item: int = 4) -> ItemResult:
     if len(horizontals) < 2 or len(verticals) < 2:
         reason = (f"figure à quatre côtés non reconnue ({len(horizontals)} côté(s) "
                   f"horizontal(aux), {len(verticals)} vertical(aux))")
-        for code in ("G", "B", "C", "D", "F"):
-            checks[code].fail(reason)
+        not_recognized(checks, ("G", "B", "C", "D", "F"), reason, notes)
         return result()
 
     top, bottom = sorted(horizontals[:2], key=lambda l: l.center[1])
@@ -58,8 +57,8 @@ def score(drawing: Drawing, item: int = 4) -> ItemResult:
     }
     points = {name: intersection(a, b) for name, (a, b) in corners.items()}
     if any(p is None for p in points.values()):
-        for code in ("G", "B", "C", "D", "F"):
-            checks[code].fail("côtés parallèles : coins introuvables")
+        not_recognized(checks, ("G", "B", "C", "D", "F"),
+                       "côtés parallèles : coins introuvables", notes)
         return result()
 
     tl, tr, br, bl = (points[n] for n in corners)

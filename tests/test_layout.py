@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from autocorrect_nepsy.layout import (LayoutError, analyse_page, deskew, guess_page_numbers,
-                                      prepare_page)
+                                      prepare_page, uncertain_guesses)
 from autocorrect_nepsy.scan import ScannedPage
 
 from synth import page, polyline
@@ -79,3 +79,30 @@ def test_drawing_past_the_end_of_the_separator_is_kept():
     # En page 1, l'en-tête est à droite : la dernière zone n'y est pas élargie.
     page1 = analyse_page(ScannedPage(page({0: 1, 1: 2, 2: 3}, layout="page1"), DPI, "p1"), 1)
     assert page1.zone(3).drawing_box[2] < 213 * ppm
+
+
+class _Structure:
+    """Page préparée réduite à sa structure (pages du cahier compatibles)."""
+
+    def __init__(self, pages):
+        self.pages = pages
+
+    def compatible_pages(self):
+        return self.pages
+
+
+def test_page_guess_is_uncertain_when_a_page_is_missing():
+    page1, four, three = _Structure([1]), _Structure([2, 3, 4]), _Structure([5, 6])
+    assert uncertain_guesses([page1, four, four, four, three, three]) == set()
+    assert uncertain_guesses([four, four, four]) == set()
+    # Page 2, 3 ou 4 absente : les deux scans à quatre items sont incertains.
+    assert uncertain_guesses([page1, four, four, three, three]) == {1, 2}
+    # Page 5 ou 6 absente : le dernier scan peut être l'une ou l'autre.
+    assert uncertain_guesses([page1, four, four, four, three]) == {4}
+    assert uncertain_guesses([four]) == {0} and uncertain_guesses([three]) == {0}
+    assert uncertain_guesses([page1]) == set()
+    # Un choix manuel est sûr et lève le doute sur la suite.
+    assert uncertain_guesses([four, four], fixed={0: 3}) == set()
+    # Scans en double ou en désordre : aucun numéro deviné n'est sûr.
+    assert uncertain_guesses([four, four, four, four]) == {0, 1, 2, 3}
+    assert uncertain_guesses([three, page1]) == {0, 1}

@@ -30,7 +30,8 @@ from . import __version__
 from .compare import format_comparison, pair_scores, read_scores
 from .criteria import SUPPORTED_ITEMS
 from .ink import INK_HUES
-from .layout import ITEMS_BY_PAGE, LayoutError, PreparedPage, guess_page_numbers, prepare_page
+from .layout import (ITEMS_BY_PAGE, LayoutError, PreparedPage, guess_page_numbers, prepare_page,
+                     uncertain_guesses)
 from .pipeline import Correction, PageInput, correct_pages, page_label
 from .report import save_results, score_row, totals
 from .scan import ScannedPage, load_pages
@@ -48,11 +49,11 @@ HELP_TEXT = f"""Comment corriger un protocole
 
 2. Cliquez sur « Ajouter des scans » et choisissez les fichiers (PDF ou images).
 
-3. Vérifiez pour chaque scan la page du cahier proposée (les numéros d'items sont imprimés sur la vignette) et sa résolution.
+3. Vérifiez pour chaque scan la page du cahier proposée (les numéros d'items sont imprimés sur la vignette) et sa résolution. Une page « à confirmer » (page manquante, scan seul) est à choisir dans la liste.
 
 4. Cliquez sur « Lancer la correction automatique ».
 
-Les notes s'affichent à droite. Les lignes surlignées sont « à vérifier » : une mesure est proche d'un seuil ou le dessin est ambigu. Le rapport détaillé montre chaque dessin et les mesures qui justifient chaque note. Les résultats sont enregistrés dans un dossier « Correction NEPSY » à côté des scans.
+Les notes s'affichent à droite. Les lignes surlignées sont « à vérifier » : une mesure est proche d'un seuil, le dessin est ambigu ou la figure du modèle n'y a pas été retrouvée. Le rapport détaillé montre chaque dessin et les mesures qui justifient chaque note. Les résultats sont enregistrés dans un dossier « Correction NEPSY » à côté des scans.
 
 L'enfant doit dessiner au stylo de couleur (bleu par défaut). Les annotations au crayon à papier sont ignorées.
 
@@ -68,6 +69,7 @@ class ScanRow:
     prepared: PreparedPage | None = None
     error: str | None = None
     manual_page: bool = False
+    guessed_page: bool = False  # page devinée sans certitude, à confirmer
     page_var: tk.StringVar | None = None
     dpi_var: tk.StringVar | None = None
     status: ttk.Label | None = None
@@ -102,7 +104,11 @@ def natural_key(path: Path) -> list:
 
 
 def results_folder(first_scan: Path) -> Path:
-    """Dossier de résultats daté, à côté des scans (ou dans Documents)."""
+    """Nouveau dossier de résultats daté, à côté des scans (ou dans Documents).
+
+    Un dossier existant n'est jamais réutilisé : deux corrections lancées dans
+    la même minute (deux enfants) ne s'écrasent pas.
+    """
     name = f"Correction NEPSY {datetime.now():%Y-%m-%d %Hh%M}"
     for base in (first_scan.parent, Path.home() / "Documents" / "AutoCorrectNEPSY", Path.home()):
         try:
@@ -110,10 +116,16 @@ def results_folder(first_scan: Path) -> Path:
             probe = base / ".autocorrect_test"
             probe.write_text("")
             probe.unlink()
-            return base / name
+            break
         except OSError:
             continue
-    return Path.cwd() / name
+    else:
+        base = Path.cwd()
+    folder, count = base / name, 1
+    while folder.exists():
+        count += 1
+        folder = base / f"{name} ({count})"
+    return folder
 
 
 def open_path(path: Path) -> None:
@@ -432,7 +444,10 @@ class App:
     def _refresh_guesses(self) -> None:
         ready = [row for row in self.rows if row.prepared]
         fixed = {i: row.number() for i, row in enumerate(ready) if row.manual_page and row.number()}
-        for row, number in zip(ready, guess_page_numbers([r.prepared for r in ready], fixed)):
+        prepared = [r.prepared for r in ready]
+        unsure = uncertain_guesses(prepared, fixed)
+        for index, (row, number) in enumerate(zip(ready, guess_page_numbers(prepared, fixed))):
+            row.guessed_page = index in unsure
             if not row.manual_page:
                 if row.page_var is None:
                     row.page_var = tk.StringVar()
@@ -510,6 +525,10 @@ class App:
         problem = self._row_problem(row)
         if problem:
             row.status.configure(text=f"⚠ {problem}", style="Warn.TLabel")
+        elif row.guessed_page:
+            row.status.configure(text="⚠ Page devinée, à confirmer : une page manquante ou un "
+                                 "scan seul rend le numéro incertain. Choisissez la page dans "
+                                 "la liste.", style="Warn.TLabel")
         else:
             row.status.configure(text="✓ Prête pour la correction", style="Ok.TLabel")
         self._update_status()
@@ -541,8 +560,8 @@ class App:
                 APP_NAME, f"{len(skipped)} scan(s) ont un problème (voir le message en orange) "
                 "et seront ignorés. Continuer quand même ?"):
             return
-        inputs = [PageInput(replace(row.scan, dpi=row.dpi()), row.number(), row.prepared)
-                  for row in ready]
+        inputs = [PageInput(replace(row.scan, dpi=row.dpi()), row.number(), row.prepared,
+                            row.guessed_page) for row in ready]
         ink = self.ink_var.get()
         first = ready[0].path
 

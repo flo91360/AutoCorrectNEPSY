@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,13 +20,42 @@ class Pair:
 
 
 def read_scores(path: str | Path) -> dict[int, dict[str, int]]:
-    """Lit un CSV de cotation (colonnes ``item``, ``general``, ``motricite_A``…)."""
+    """Lit un CSV de cotation (colonnes ``item``, ``general``, ``motricite_A``…).
+
+    Accepte aussi un tableau enregistré par Excel : séparateur point-virgule,
+    encodage Windows, marque d'ordre des octets en tête du fichier. Les lignes
+    sans numéro d'item (total, ligne vide) sont ignorées. Un fichier absent ou
+    illisible lève ``ValueError`` avec un message lisible.
+    """
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f"{path} : fichier introuvable")
+    raw = path.read_bytes()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+    header = text.splitlines()[0] if text else ""
+    reader = csv.DictReader(io.StringIO(text), delimiter=max(",;\t", key=header.count))
+    columns = {name.strip().lower(): name for name in reader.fieldnames or [] if name}
+    if "item" not in columns:
+        raise ValueError(f"{path.name} : colonne « item » absente (première ligne : {header!r})")
     scores: dict[int, dict[str, int]] = {}
-    with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            item = int(row["item"])
-            scores[item] = {code: int(row[name]) for code, name in FIELD_BY_CODE.items()
-                            if row.get(name, "").strip() != ""}
+    for row in reader:
+        item = (row.get(columns["item"]) or "").strip()
+        if not item.isdigit():
+            continue
+        found: dict[str, int] = {}
+        for code, name in FIELD_BY_CODE.items():
+            column = columns.get(name.lower())
+            value = (row.get(column) or "").strip() if column else ""
+            if not value:
+                continue
+            if value not in ("0", "1"):
+                raise ValueError(f"{path.name} : note « {value} » illisible (item {item}, "
+                                 f"colonne {name}, 0 ou 1 attendu)")
+            found[code] = int(value)
+        scores[int(item)] = found
     return scores
 
 

@@ -16,7 +16,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt
+from .base import Checks, ItemResult, empty_result, fmt, not_recognized
 from .polygons import (EDGE_OFFSET_MM, Polygon, away_from, fit_polygon, raster, regions,
                        silhouette, wavy_changes)
 from .shapes import EXTRA_ELEMENT_MM
@@ -53,8 +53,7 @@ def score(drawing: Drawing, item: int = 16) -> ItemResult:
                           marks)
 
     def fail(reason: str, *failing: str) -> ItemResult:
-        for code in failing:
-            checks[code].fail(reason)
+        not_recognized(checks, failing, reason, notes)
         return result()
 
     outline = silhouette(drawing)

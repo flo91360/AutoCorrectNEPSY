@@ -193,6 +193,38 @@ def guess_page_numbers(pages: list[PreparedPage],
     return numbers
 
 
+def uncertain_guesses(pages: list[PreparedPage],
+                      fixed: dict[int, int] | None = None) -> set[int]:
+    """Scans dont le numéro de page deviné n'est pas sûr.
+
+    Les pages 2 à 4, comme les pages 5 et 6, ont la même structure : quand l'une
+    manque, ou pour un scan seul, plusieurs suites de pages dans l'ordre du cahier
+    conviennent, et le numéro deviné peut être faux (une page 3 prise pour la
+    page 2). Un scan est sûr si toutes ces suites lui donnent le même numéro.
+    ``fixed`` donne les numéros choisis à la main (index -> numéro), sûrs.
+    """
+    fixed = fixed or {}
+    options = [[fixed[index]] if index in fixed else page.compatible_pages() or list(ITEMS_BY_PAGE)
+               for index, page in enumerate(pages)]
+    possible: list[set[int]] = [set() for _ in pages]
+
+    def follow(index: int, previous: int, chosen: list[int]) -> None:
+        if index == len(pages):
+            for i, number in enumerate(chosen):
+                possible[i].add(number)
+            return
+        for number in options[index]:
+            if number > previous:
+                follow(index + 1, number, chosen + [number])
+
+    follow(0, 0, [])
+    unsure = [index for index in range(len(pages)) if index not in fixed]
+    if pages and not possible[0]:
+        # Aucune suite dans l'ordre du cahier : scans en désordre ou en double.
+        return set(unsure)
+    return {index for index in unsure if len(possible[index]) > 1}
+
+
 def deskew(image: np.ndarray) -> tuple[np.ndarray, float]:
     """Corrige la légère inclinaison du scan d'après les longs traits imprimés."""
     faint = faint_mask(image) * 255

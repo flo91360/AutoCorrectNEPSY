@@ -22,7 +22,7 @@ from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
 from . import polygons
-from .base import Checks, ItemResult, empty_result, fmt
+from .base import Checks, ItemResult, empty_result, fmt, not_recognized, unrecognized_note
 from .curves import extrema
 from .shapes import separate_extras
 
@@ -96,20 +96,26 @@ def score(drawing: Drawing, item: int = 20) -> ItemResult:
     checks = {code: Checks() for code in codes}
     measures: dict[str, float] = {}
     marks: list = []
+    notes: list[str] = []
 
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     outlines = polygons.regions(drawing, opened=False)
     center = _center(drawing, outlines)
     tips = _tips(drawing, center)
     if len(tips) < 2:
-        for code in codes:
-            checks[code].fail("fleur non reconnue (pétales qui partent d'un centre)")
+        not_recognized(checks, codes, "fleur non reconnue (pétales qui partent d'un centre)",
+                       notes)
         return result()
     petals = _petals(tips, outlines, center)
     count = len(petals)
     measures["pétales"] = float(count)
+    if count != PETALS:
+        # Pétales fondus ou manqués, ou gribouillis pris pour une fleur : le
+        # nombre lu n'est pas sûr.
+        notes.append(unrecognized_note(f"{count} pétale(s) lu(s) au lieu de 6"))
 
     lengths, widths, angles, tip_angles = [], [], [], []
     for k, petal in enumerate(petals):
@@ -170,8 +176,11 @@ def score(drawing: Drawing, item: int = 20) -> ItemResult:
     general.limit(spread, f"extrémités intérieures à {fmt(spread)} les unes des autres (≤ 5 mm)",
                   high=CONVERGE_LOOSE_MM)
 
-    checks["A"].limit(sharp, f"angle le plus marqué le long des bords {sharp:.0f}° ≤ 75° "
-                      "(pas de distorsion majeure)", high=CORNER_DEG, unit="deg")
+    if corners:
+        checks["A"].limit(sharp, f"angle le plus marqué le long des bords {sharp:.0f}° ≤ 75° "
+                          "(pas de distorsion majeure)", high=CORNER_DEG, unit="deg")
+    else:
+        checks["A"].fail("bords des pétales non mesurables (aucun pétale fermé)")
 
     raster = polygons.raster(drawing)
     tip_gaps = [_tip_gap(drawing, raster, p) for p in petals]

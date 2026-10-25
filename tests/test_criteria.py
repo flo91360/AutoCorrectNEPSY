@@ -8,8 +8,8 @@ from autocorrect_nepsy.ink import ink_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
 from synth import (PX_PER_MM, bucket, canvas, circle_points, cross_points, cylinder, dot, dot_row,
-                   draw_model, flower, nested_triangles, polyline, s_curve, stairs_points, v_shape,
-                   wheels)
+                   draw_model, flower, nested_triangles, polyline, rounded_rectangle, s_curve,
+                   stairs_points, v_shape, wheels, zigzag)
 
 
 def score(item, image):
@@ -467,3 +467,39 @@ def test_borderline_measure_is_flagged():
     assert result.criteria["D"].met
     assert result.criteria["D"].borderline
     assert result.to_review
+
+
+@pytest.mark.parametrize("item", [i for i in range(4, 22) if i != 14])
+def test_unrecognized_figure_asks_review(item):
+    # Un cercle seul : la figure du modèle n'est pas retrouvée. L'enfant a peut-être
+    # dessiné autre chose, mais l'outil a aussi pu mal lire le dessin : l'item est à
+    # vérifier au lieu d'être noté 0 en silence.
+    result = score(item, polyline(canvas(), circle_points((32, 44), 15), closed=True))
+    assert result.to_review
+    assert any("l'outil a pu mal lire le dessin" in note for note in result.notes)
+
+
+def test_item4_rounded_corners_are_not_dropped_silently():
+    # Coins arrondis de 4 mm : le carré n'est pas reconnu, il doit être signalé.
+    result = score(4, polyline(canvas(), rounded_rectangle(12, 24, 52, 64, 4.0), closed=True))
+    assert result.to_review
+    slightly = score(4, polyline(canvas(), rounded_rectangle(12, 24, 52, 64, 1.5), closed=True))
+    assert set(scores(slightly).values()) == {1}
+
+
+def test_item1_zigzag_and_extra_line_ask_review():
+    # Seule la plus longue ligne est notée : un trait en zigzag ou un trait en trop
+    # ne doit pas passer sans vérification.
+    assert score(1, polyline(canvas(), zigzag(32, 24, 64, 3.0))).to_review
+    image = polyline(canvas(), [(32, 24), (32, 64)])
+    polyline(image, [(10, 75), (40, 75)], seed=1)
+    assert score(1, image).to_review
+    for item in (1, 2):
+        assert not score(item, draw_model(item, canvas(), wobble=0.8)).to_review
+
+
+def test_item20_unexpected_petal_count_asks_review():
+    result = score(20, flower_image(petals=7))
+    assert result.to_review
+    assert any("7 pétale(s) lu(s) au lieu de 6" in note for note in result.notes)
+    assert not any("pétale(s) lu(s)" in note for note in score(20, flower_image()).notes)

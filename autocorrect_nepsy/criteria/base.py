@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Iterable
 
 CODES = ("G", "A", "B", "C", "D", "E", "F")
 PROCESS_NAMES = {"G": "Général", "A": "Motricité A", "B": "Motricité B",
@@ -98,6 +99,20 @@ def empty_result(item: int, codes: tuple[str, ...], reason: str) -> ItemResult:
     """Résultat d'un item sans dessin exploitable : tous les critères à 0."""
     return ItemResult(item, {code: Checks().fail(reason).criterion(code) for code in codes},
                       notes=[reason])
+
+
+def not_recognized(checks: dict[str, Checks], codes: Iterable[str], reason: str,
+                   notes: list[str]) -> None:
+    """La figure du modèle n'est pas retrouvée dans le dessin : les critères ``codes``
+    échouent et l'item est à vérifier. L'enfant a peut-être dessiné autre chose, mais
+    l'outil a aussi pu mal lire un dessin correct (coins arrondis, traits mal fermés)."""
+    for code in codes:
+        checks[code].fail(reason)
+    notes.append(unrecognized_note(reason))
+
+
+def unrecognized_note(reason: str) -> str:
+    return f"{reason} : vérifier la cotation, l'outil a pu mal lire le dessin"
 
 
 def fmt(value: float, unit: str = "mm") -> str:

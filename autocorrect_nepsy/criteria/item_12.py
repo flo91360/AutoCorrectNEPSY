@@ -13,7 +13,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import STEP_MM, Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
 from .curves import Curve, InkGraph, crossing, extrema
 from .shapes import EXTRA_ELEMENT_MM
 
@@ -39,9 +39,11 @@ def score(drawing: Drawing, item: int = 12) -> ItemResult:
     checks = {code: Checks() for code in codes}
     measures: dict[str, float] = {}
     marks: list = []
+    notes: list[str] = []
 
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, marks=marks)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     graph = InkGraph(drawing.strokes)
     tips = _tips(graph)
@@ -50,8 +52,7 @@ def score(drawing: Drawing, item: int = 12) -> ItemResult:
     if curves is None:
         reason = (f"deux lignes qui se croisent non reconnues ({len(tips)} extrémité(s) "
                   "libre(s), il en faut 4)")
-        for code in codes:
-            checks[code].fail(reason)
+        not_recognized(checks, codes, reason, notes)
         return result()
     horizontal, vertical = curves
     x = crossing(horizontal, vertical)

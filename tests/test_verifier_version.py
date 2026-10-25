@@ -56,8 +56,10 @@ def test_depot_coherent():
 
 
 def test_notes_en_utf8(capfd, monkeypatch):
-    """Les notes de la Release gardent leurs accents, quel que soit l'encodage de la console."""
-    monkeypatch.setattr(vv.sys, "stdout", open(1, "w", encoding="cp1252", closefd=False))
+    """Les notes de la Release gardent leurs accents et leurs fins de ligne, quelle que soit la
+    console (celle de Windows : cp1252 et fins de ligne CRLF)."""
+    console = open(1, "w", encoding="cp1252", newline="\r\n", closefd=False)
+    monkeypatch.setattr(vv.sys, "stdout", console)
     vv.main(["--notes"])
     vv.sys.stdout.flush()
     sortie = capfd.readouterr().out

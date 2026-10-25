@@ -46,8 +46,12 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "comparer":
-        print(format_comparison(pair_scores(read_scores(args.automatique),
-                                            read_scores(args.reference))))
+        try:
+            pairs = pair_scores(read_scores(args.automatique), read_scores(args.reference))
+        except ValueError as error:
+            print(f"Erreur : {error}", file=sys.stderr)
+            return 1
+        print(format_comparison(pairs))
         return 0
 
     try:

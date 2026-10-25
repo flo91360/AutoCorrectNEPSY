@@ -56,6 +56,13 @@ def score(drawing: Drawing, item: int) -> ItemResult:
              mk.angle(start, start + axis * min(15.0, length), end,
                       f"{deviation:.0f}° / {'verticale' if item == 1 else 'horizontale'}")]
 
+    # Seule la plus longue ligne est notée : un trait brisé ou en zigzag, ou un
+    # trait en trop, donne plusieurs lignes et la note peut ne pas le refléter.
+    count = len(drawing.significant_lines())
+    notes = [] if count <= 1 else [
+        f"{count} lignes dans la zone (trait brisé, en zigzag ou trait en trop) : seule la "
+        "plus longue est notée, vérifier la cotation"]
+
     return ItemResult(
         item,
         {"G": general.criterion("G"), "A": motor_a.criterion("A"),
@@ -63,5 +70,6 @@ def score(drawing: Drawing, item: int) -> ItemResult:
          "D": global_d.criterion("D")},
         measures={"longueur_mm": length, "ecart_axe_deg": deviation,
                   "largeur_bande_mm": line.width},
+        notes=notes,
         marks=marks,
     )
