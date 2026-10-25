@@ -12,14 +12,14 @@ import numpy as np
 
 from .criteria import CODES, PROCESS_NAMES
 from .pipeline import Correction, ItemReport
+from .render import DISPLAY_WIDTH, measured_image
 
 # Mêmes colonnes que la retranscription de la feuille de cotation de l'ergo.
 CSV_FIELDS = ["item", "general", "motricite_A", "motricite_B", "motricite_total",
               "global_C", "global_D", "global_total", "local_E", "local_F", "local_total"]
 FIELD_BY_CODE = {"G": "general", "A": "motricite_A", "B": "motricite_B", "C": "global_C",
                  "D": "global_D", "E": "local_E", "F": "local_F"}
-STROKE_COLORS = [(40, 40, 220), (30, 150, 30), (200, 90, 20), (0, 140, 230),
-                 (170, 40, 170), (150, 150, 0), (90, 60, 160)]
+
 
 
 def _blank(value: int | None) -> str:
@@ -61,28 +61,23 @@ def drawing_image(report: ItemReport) -> np.ndarray:
 
 
 def annotate(report: ItemReport) -> np.ndarray:
-    """Traits reconstruits par l'outil, seuls sur fond blanc : chaque trait
-    continu en couleur et, en gris fin, les lignes droites mesurées.
+    """Traits reconstruits par l'outil, seuls sur fond blanc, avec les mesures
+    qui ont servi à la cotation (voir ``render.py``).
 
     Ils ne sont pas superposés au dessin de l'enfant, qui est montré à part
     (``drawing_image``) : superposés, ils ressemblaient à un second tracé lissé.
     """
-    ppm = report.px_per_mm
-    image = np.full_like(report.zone_image, 255)
-    thickness = max(2, int(round(0.3 * ppm)))
-    for i, stroke in enumerate(report.drawing.strokes):
-        pts = np.round(stroke.points * ppm).astype(np.int32)
-        cv2.polylines(image, [pts], stroke.closed, STROKE_COLORS[i % len(STROKE_COLORS)],
-                      thickness, cv2.LINE_AA)
-    for line in report.drawing.significant_lines():
-        a, b = (tuple(int(v) for v in np.round(p * ppm)) for p in line.ends)
-        cv2.line(image, a, b, (60, 60, 60), 1, cv2.LINE_AA)
-    _scale_bar(image, ppm)
-    return image
+    drawing = report.drawing
+    marks = report.result.marks
+    # Les lignes droites ajustées n'ont de sens que pour les figures faites de
+    # traits droits (celles qui ont une barre grisée), pas pour les cercles.
+    lines = drawing.significant_lines() if any(m.kind == "bande" for m in marks) else []
+    return measured_image(report.zone_image.shape, report.px_per_mm, drawing.strokes, lines,
+                          marks, drawing.stroke_width)
 
 
-def _png_data_uri(image: np.ndarray, max_width: int = 320) -> str:
-    if image.shape[1] > max_width:
+def _png_data_uri(image: np.ndarray, max_width: int | None = 320) -> str:
+    if max_width and image.shape[1] > max_width:
         scale = max_width / image.shape[1]
         image = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     ok, buffer = cv2.imencode(".png", image)
@@ -116,9 +111,10 @@ def write_html(correction: Correction, path: Path) -> None:
             f"<p class='source'>{esc(report.source)}, page {report.page} du cahier</p>{notes}"
             f'<div class="item"><figure><img src="{_png_data_uri(drawing_image(report))}" '
             f'alt="Dessin de l’item {report.item}"><figcaption>Dessin de l’enfant</figcaption></figure>'
-            f'<figure><img src="{_png_data_uri(annotate(report))}" '
-            f'alt="Traits reconstruits de l’item {report.item}"><figcaption>Traits lus par '
-            f'l’outil (lignes droites mesurées en gris)</figcaption></figure>'
+            f'<figure class="mesures"><img src="{_png_data_uri(annotate(report), None)}" '
+            f'width="{DISPLAY_WIDTH}" alt="Traits et mesures de l’item {report.item}">'
+            f'<figcaption>Traits lus par l’outil et mesures utilisées pour la cotation '
+            f'(barre grisée en gris clair)</figcaption></figure>'
             f'<table>{"".join(criteria)}</table></div></section>')
     warnings = "".join(f"<p class='warn'>⚠ {esc(w)}</p>" for w in correction.warnings)
     headers = "".join(f"<th>{h}</th>" for h in
@@ -136,6 +132,8 @@ th, td {{ border: 1px solid #ccc; padding: .3rem .5rem; vertical-align: top; tex
 .item {{ display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-start; }}
 .item img {{ border: 1px solid #ddd; max-width: 100%; }}
 figure {{ margin: 0; max-width: 320px; }}
+figure.mesures {{ max-width: {DISPLAY_WIDTH}px; }}
+figure.mesures img {{ width: 100%; height: auto; }}
 figcaption {{ color: #666; font-size: .85rem; }}
 .score {{ font-weight: bold; text-align: center; }}
 .s1 {{ background: #e3f4e3; }} .s0 {{ background: #fbe4e4; }}

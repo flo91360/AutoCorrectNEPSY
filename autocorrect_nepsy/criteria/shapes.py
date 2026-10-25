@@ -112,6 +112,9 @@ class CircleMetrics:
     rounded: bool  # au moins un changement de direction arrondi
     corners: int  # angles marqués (hors extrémités du trait)
     radius_spread: float  # irrégularité du rayon (écart-type / rayon moyen)
+    long_ends: tuple[np.ndarray, np.ndarray]  # extrémités du grand diamètre
+    short_ends: tuple[np.ndarray, np.ndarray]  # petit diamètre, passant par le centre
+    straight_ends: tuple[np.ndarray, np.ndarray]  # plus longue section droite
 
     @property
     def ratio(self) -> float:
@@ -120,8 +123,9 @@ class CircleMetrics:
 
 def circle_metrics(stroke: Stroke, stroke_width: float) -> CircleMetrics:
     points = stroke.points
-    long_d = geo.max_diameter(points)
-    short_d = geo.min_strip_width(points)
+    long_ends = geo.max_diameter_ends(points)
+    long_d = float(np.linalg.norm(long_ends[1] - long_ends[0]))
+    short_d, strip = geo.min_strip(points)
     perimeter = np.pi * (long_d + short_d) / 2
     center = points.mean(axis=0)
     rel = points - center
@@ -140,13 +144,20 @@ def circle_metrics(stroke: Stroke, stroke_width: float) -> CircleMetrics:
     overshoot = layered / 72 * perimeter
     closed_pts = np.vstack([points, points[:1]]) if stroke.closed else points
     keep = geo.rdp(closed_pts, 1.0)
-    segments = np.linalg.norm(np.diff(closed_pts[keep], axis=0), axis=1)
+    vertices = closed_pts[keep]
+    segments = np.linalg.norm(np.diff(vertices, axis=0), axis=1)
     longest = float(segments.max()) if len(segments) else 0.0
+    i = int(np.argmax(segments)) if len(segments) else 0
+    straight_ends = (vertices[i], vertices[min(i + 1, len(vertices) - 1)])
+    along = geo.unit(strip[1] - strip[0])
+    foot = strip[0] + along * float((center - strip[0]) @ along)
+    short_ends = (foot, foot + (strip[3] - strip[0]))
     return CircleMetrics(
         center, long_d, short_d, perimeter, gap, overshoot, longest,
         rounded=_has_rounded_turn(stroke),
         corners=_inner_corners(stroke),
         radius_spread=float(radii.std() / max(radii.mean(), 1e-6)),
+        long_ends=long_ends, short_ends=short_ends, straight_ends=straight_ends,
     )
 
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from ..strokes import Drawing
 from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from . import marks as mk
 from .shapes import (check_lines, end_at, extra_elements, intersection, outside,
                      review_notes)
 
@@ -29,8 +30,11 @@ def score(drawing: Drawing, item: int = 5) -> ItemResult:
     notes = review_notes(lines)
     check_lines(checks["A"], lines, STRAIGHT_BAND_MM, MAX_INTERRUPTIONS)
 
+    marks: list = [mk.bande(line, at="bout") for line in lines]
+
     def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes)
+        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
+                          marks)
 
     verticals = [l for l in lines if l.angle_to_vertical() < 45]
     horizontals = [l for l in lines if l.angle_to_horizontal() <= 45]
@@ -53,6 +57,12 @@ def score(drawing: Drawing, item: int = 5) -> ItemResult:
     ratio = vertical.length / max(horizontal.length, 1e-6)
     two_lines = len(lines) == 2
     max_overshoot = GENERAL_MAX_OVERSHOOT * horizontal.length
+    junction_text = f"jonction à {position:.0%} de la hauteur"
+    if gap >= 0.5:
+        junction_text += f", intervalle {fmt(gap)}"
+    if overshoot >= 0.5:
+        junction_text += f", dépassement {fmt(overshoot)}"
+    marks += [mk.line_length(vertical), mk.line_length(horizontal), mk.point(junction, junction_text)]
     measures.update({"verticale_mm": vertical.length, "horizontale_mm": horizontal.length,
                      "intervalle_mm": gap, "depassement_mm": overshoot,
                      "position_intersection": position, "rapport_longueurs": ratio})

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from ..strokes import Drawing
 from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio
+from . import marks as mk
 from .shapes import STRAIGHT_MARGIN_MM, circle_metrics, circular_strokes
 
 MAX_DIAMETER_RATIO = 2.0  # rapport grand / petit diamètre
@@ -44,6 +45,10 @@ def score(drawing: Drawing, item: int = 3) -> ItemResult:
     global_d.limit(m.ratio, f"rapport des diamètres {fmt_ratio(m.ratio)} ≤ 2:1",
                    high=MAX_DIAMETER_RATIO, unit="ratio")
 
+    marks = [mk.segment(*m.long_ends, f"grand Ø {fmt(m.long_diameter)}"),
+             mk.segment(*m.short_ends, f"petit Ø {fmt(m.short_diameter)}"),
+             mk.segment(*m.straight_ends, f"section droite {fmt(m.longest_straight)}")]
+
     return ItemResult(
         item,
         {"G": general.criterion("G"), "A": motor_a.criterion("A"),
@@ -52,4 +57,5 @@ def score(drawing: Drawing, item: int = 3) -> ItemResult:
         measures={"grand_diametre_mm": m.long_diameter, "petit_diametre_mm": m.short_diameter,
                   "intervalle_mm": m.gap, "depassement_mm": m.overshoot,
                   "section_droite_max_mm": m.longest_straight},
+        marks=marks,
     )

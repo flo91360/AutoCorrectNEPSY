@@ -38,6 +38,7 @@ def test_correct_command_writes_scores_and_report(scanned_pdf, tmp_path, capsys)
         assert row["motricite_total"] == row["global_total"] == row["local_total"] == "2"
     html = (out / "rapport.html").read_text(encoding="utf-8")
     assert "Item 7" in html and "data:image/png;base64," in html
+    assert html.count('class="mesures"') == 4  # une image de mesures par item
     assert "item" in capsys.readouterr().out
 
     assert main(["comparer", str(out / "cotation.csv"), str(out / "cotation.csv")]) == 0

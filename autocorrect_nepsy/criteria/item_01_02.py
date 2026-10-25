@@ -10,6 +10,7 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from .base import Checks, ItemResult, empty_result, fmt
+from . import marks as mk
 
 GENERAL_MIN_MM = 7.0  # trace d'au moins 7 mm
 GENERAL_CONE = 30.0  # plus de la moitié du trait à moins de 30° de l'axe
@@ -49,6 +50,12 @@ def score(drawing: Drawing, item: int) -> ItemResult:
     if item == 2:
         global_d.limit(length, f"longueur {fmt(length)} ≤ 70 mm", high=ITEM2_MAX_MM)
 
+    # Écart à l'axe mesuré depuis l'extrémité haute (item 1) ou gauche (item 2).
+    start, end = sorted(line.ends, key=lambda p: p[1] if item == 1 else p[0])
+    marks = [mk.line_length(line), mk.bande(line),
+             mk.angle(start, start + axis * min(15.0, length), end,
+                      f"{deviation:.0f}° / {'verticale' if item == 1 else 'horizontale'}")]
+
     return ItemResult(
         item,
         {"G": general.criterion("G"), "A": motor_a.criterion("A"),
@@ -56,4 +63,5 @@ def score(drawing: Drawing, item: int) -> ItemResult:
          "D": global_d.criterion("D")},
         measures={"longueur_mm": length, "ecart_axe_deg": deviation,
                   "largeur_bande_mm": line.width},
+        marks=marks,
     )
