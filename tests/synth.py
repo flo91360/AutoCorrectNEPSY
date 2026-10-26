@@ -313,9 +313,11 @@ COLUMNS_MM = {
 }
 
 
-def page(items_by_column: dict[int, int], layout=4, ppm: float = 100 / 25.4) -> np.ndarray:
+def page(items_by_column: dict[int, int], layout=4, ppm: float = 100 / 25.4,
+         models: bool = True) -> np.ndarray:
     """Page du cahier dans le sens de passation : modèles imprimés en haut,
-    copies de l'enfant au stylo bleu en bas. ``layout`` vaut 4, 3 ou "page1"."""
+    copies de l'enfant au stylo bleu en bas. ``layout`` vaut 4, 3 ou "page1" ;
+    ``models=False`` : modèles illisibles (absents du scan)."""
     bounds = COLUMNS_MM[layout]
     image = np.full((int(PAGE_H_MM * ppm), int(PAGE_W_MM * ppm), 3), 245, np.uint8)
 
@@ -329,6 +331,7 @@ def page(items_by_column: dict[int, int], layout=4, ppm: float = 100 / 25.4) -> 
         cv2.line(image, px(x, 15), px(x, 195), LINE_GRAY, thickness)
     for column, item in items_by_column.items():
         x0 = bounds[column]
-        draw_model(item, image, PRINT_BLACK, ppm=ppm, offset=(x0, 15))
+        if models:
+            draw_model(item, image, PRINT_BLACK, ppm=ppm, offset=(x0, 15))
         draw_model(item, image, BLUE_PEN, ppm=ppm, offset=(x0, SEPARATOR_Y_MM))
     return image

@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.11.0] - 2026-10-25
+
+- Numéro de page lu sur les modèles imprimés quand la structure ne suffit pas (page manquante, scan seul, scans dans le désordre) : --pages n'est plus demandé que si les modèles sont illisibles
+- Une page dont les modèles imprimés ressemblent nettement à ceux d'une autre page est signalée « à vérifier » (scans dans le désordre, mauvais choix de page)
+
 ## [0.10.0] - 2026-10-25
 
 - Commande « valider » : correction d'un corpus local de protocoles comparée à la cotation de l'ergothérapeute, avec des chiffres d'ensemble seulement (accord et kappa par processus, critère et item, écarts des totaux, désaccords signalés, objectifs d'acceptation) et le suivi des changements d'une version à l'autre

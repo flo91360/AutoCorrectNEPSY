@@ -46,11 +46,26 @@ def test_correct_command_writes_scores_and_report(scanned_pdf, tmp_path, capsys)
     assert "Accord global : 28/28" in capsys.readouterr().out
 
 
-def test_lone_scan_needs_its_page_number(scanned_pdf, tmp_path, capsys):
-    # Les pages 2 à 4 du cahier ont la même structure : un scan seul pourrait être
-    # l'une ou l'autre, le numéro n'est pas deviné.
-    assert main(["corriger", str(scanned_pdf), "-o", str(tmp_path)]) == 1
+def test_lone_scan_page_is_read_on_its_printed_models(scanned_pdf, tmp_path, capsys):
+    # Les pages 2 à 4 ont la même structure : les modèles imprimés départagent.
+    assert main(["corriger", str(scanned_pdf), "-o", str(tmp_path)]) == 0
+    assert "Page 2 (items 4 à 7)" in capsys.readouterr().out
+
+
+def test_lone_scan_without_readable_models_needs_its_page_number(tmp_path, capsys):
+    path = tmp_path / "sans modeles.pdf"
+    rgb = cv2.cvtColor(page({0: 4, 1: 5, 2: 6, 3: 7}, models=False), cv2.COLOR_BGR2RGB)
+    Image.fromarray(rgb).save(path, "PDF", resolution=DPI)
+    assert main(["corriger", str(path), "-o", str(tmp_path / "sortie")]) == 1
     assert "--pages" in capsys.readouterr().err
+
+
+def test_page_whose_models_belong_to_another_page_is_flagged(tmp_path, capsys):
+    path = tmp_path / "page 3.pdf"
+    rgb = cv2.cvtColor(page({0: 8, 1: 9, 2: 10, 3: 11}), cv2.COLOR_BGR2RGB)
+    Image.fromarray(rgb).save(path, "PDF", resolution=DPI)
+    assert main(["corriger", str(path), "--pages", "2", "-o", str(tmp_path / "sortie")]) == 0
+    assert "les modèles imprimés ressemblent plutôt à la Page 3" in capsys.readouterr().out
 
 
 def test_page_numbers_are_guessed_when_certain(tmp_path, capsys):
