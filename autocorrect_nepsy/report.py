@@ -22,6 +22,12 @@ FIELD_BY_CODE = {"G": "general", "A": "motricite_A", "B": "motricite_B", "C": "g
 # cotation.csv : notes retenues, corrections de l'ergothérapeute comprises.
 # cotation_automatique.csv : proposition de l'outil telle quelle, pour mesurer
 # son accord avec l'ergothérapeute (``comparer``).
+# Format d'Excel en français : point-virgule et UTF-8 avec marque d'ordre des
+# octets (sans elle, Excel lit les accents en encodage Windows). Les notes sont
+# des entiers : le point-virgule ne gêne aucun nombre. « comparer » relit aussi
+# les CSV séparés par des virgules.
+CSV_DELIMITER = ";"
+CSV_ENCODING = "utf-8-sig"
 SCORES_NAME = "cotation.csv"
 AUTOMATIC_NAME = "cotation_automatique.csv"
 REPORT_NAME = "rapport.html"
@@ -49,8 +55,8 @@ def corrected_codes(report: ItemReport) -> list[str]:
 
 def write_csv(correction: Correction, path: Path, automatic: bool = False) -> None:
     extra = ["a_verifier"] if automatic else ["a_verifier", "verifie", "corrige"]
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS + extra)
+    with open(path, "w", newline="", encoding=CSV_ENCODING) as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS + extra, delimiter=CSV_DELIMITER)
         writer.writeheader()
         for report in correction.items:
             if automatic:

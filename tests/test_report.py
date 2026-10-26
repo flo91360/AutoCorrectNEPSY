@@ -19,7 +19,8 @@ def reviewed_correction():
 
 
 def rows(path):
-    return {row["item"]: row for row in csv.DictReader(open(path, encoding="utf-8"))}
+    rows = csv.DictReader(open(path, encoding="utf-8-sig"), delimiter=";")
+    return {row["item"]: row for row in rows}
 
 
 def test_scores_file_holds_the_ergo_corrections_and_the_automatic_one_does_not(tmp_path):
@@ -30,6 +31,19 @@ def test_scores_file_holds_the_ergo_corrections_and_the_automatic_one_does_not(t
     assert final["4"]["verifie"] == final["4"]["corrige"] == ""
     assert automatic["5"]["motricite_A"] == "1" and automatic["5"]["motricite_total"] == "2"
     assert "verifie" not in automatic["5"]
+
+
+def test_scores_file_opens_in_french_excel_and_is_read_back(tmp_path):
+    from autocorrect_nepsy.compare import read_flags, read_scores
+
+    csv_path, _ = save_results(reviewed_correction(), tmp_path)
+    raw = csv_path.read_bytes()
+    # Marque d'ordre des octets (accents lus en UTF-8) et point-virgule (une
+    # colonne par critère dans Excel en français).
+    assert raw.startswith(b"\xef\xbb\xbf")
+    assert raw[3:].decode("utf-8").startswith("item;general;motricite_A;")
+    assert read_scores(csv_path)[5]["A"] == 0 and read_flags(csv_path) == set()
+    assert read_scores(tmp_path / AUTOMATIC_NAME)[5]["A"] == 1
 
 
 def test_report_shows_child_and_corrected_scores(tmp_path):

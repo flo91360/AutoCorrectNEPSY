@@ -10,20 +10,29 @@ from synth import page
 DPI = 100
 
 
-def correct(dpi: float = DPI, guessed: bool = False):
-    scan = ScannedPage(page({0: 4, 1: 5, 2: 6, 3: 7}), dpi, "synthétique")
+def correct(dpi: float = DPI, guessed: bool = False, drawn_dpi: float = DPI):
+    """Page 2 dessinée à ``drawn_dpi``, déclarée à ``dpi``."""
+    scan = ScannedPage(page({0: 4, 1: 5, 2: 6, 3: 7}, ppm=drawn_dpi / 25.4), dpi, "synthétique")
     return correct_pages([PageInput(scan, 2, guessed=guessed)])
 
 
 def test_sure_page_at_the_right_scale_raises_no_doubt():
-    correction = correct()
+    correction = correct(dpi=200, drawn_dpi=200)
     assert not correction.warnings
+    assert not any(report.result.to_review for report in correction.items)
+
+
+def test_low_resolution_is_a_warning_not_a_doubt_on_each_item():
+    correction = correct()  # 100 dpi, sous les 200 dpi demandés
+    assert correction.warnings == ["synthétique : résolution de 100 dpi, sous les 200 dpi "
+                                   "demandés : mesures moins précises, scanner à 200 dpi au moins "
+                                   "(300 conseillés)"]
     assert not any(report.result.to_review for report in correction.items)
 
 
 def test_guessed_page_flags_every_item():
     correction = correct(guessed=True)
-    assert len(correction.warnings) == 1 and "à confirmer" in correction.warnings[0]
+    assert len([w for w in correction.warnings if "à confirmer" in w]) == 1
     assert all(any("page du cahier devinée" in note for note in report.result.notes)
                for report in correction.items)
 

@@ -73,6 +73,9 @@ def test_scan_to_scores(app, scan):
     assert row.dpi() == pytest.approx(100)
     assert app._row_problem(row) is None
     assert str(app.run_button.cget("state")) == "normal"
+    # Scan à 100 dpi : prêt, avec un avertissement de résolution.
+    assert "Prête" in str(row.status.cget("text"))
+    assert "Résolution de 100 dpi, sous les 200 dpi demandés" in str(row.status.cget("text"))
 
     app.run_correction()
     wait(app, lambda: app.correction is not None and not app.busy)
@@ -216,7 +219,8 @@ def corrected(app, scan, child=""):
 def csv_rows(path):
     import csv
 
-    return {row["item"]: row for row in csv.DictReader(open(path, encoding="utf-8"))}
+    rows = csv.DictReader(open(path, encoding="utf-8-sig"), delimiter=";")
+    return {row["item"]: row for row in rows}
 
 
 def test_ergo_checks_and_corrects_an_item(app, scan, tmp_path, monkeypatch):
@@ -273,6 +277,30 @@ def test_review_cancel_changes_nothing_and_needs_a_selected_item(app, scan, monk
     app.run_correction()
     assert app.review_window is None
     wait(app, lambda: not app.busy)
+
+
+def test_review_column_names_the_borderline_criteria():
+    from autocorrect_nepsy.criteria import score_item
+    from autocorrect_nepsy.criteria.base import Scoring
+    from autocorrect_nepsy.gui import review_state
+    from autocorrect_nepsy.ink import ink_mask
+    from autocorrect_nepsy.pipeline import ItemReport
+    from autocorrect_nepsy.strokes import extract_drawing
+    from synth import PX_PER_MM, canvas, polyline
+
+    def report(result):
+        return ItemReport(result.item, 2, "scan", result, None, None, PX_PER_MM)
+
+    # Rapport des côtés de 1,28:1, proche du seuil de 1,3:1 de Local F.
+    corners = [(12, 24), (52, 24), (52, 55.25), (12, 55.25)]
+    near = report(score_item(4, extract_drawing(ink_mask(polyline(canvas(), corners, closed=True)),
+                                                PX_PER_MM)))
+    assert review_state(near) == ("⚠ F", ("review",))
+    scoring = Scoring(4, "GA")
+    scoring.not_recognized("G", "carré non reconnu")
+    assert review_state(report(scoring.result())) == ("⚠ oui", ("review",))
+    near.review({})
+    assert review_state(near) == ("✓ vérifié", ("checked",))
 
 
 def test_icon_is_drawn():

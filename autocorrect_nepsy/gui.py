@@ -32,7 +32,8 @@ from .criteria import CODES, PROCESS_NAMES, SUPPORTED_ITEMS
 from .ink import INK_HUES
 from .identify import resolve
 from .layout import ITEMS_BY_PAGE, LayoutError, PreparedPage, prepare_page
-from .pipeline import Correction, ItemReport, PageInput, correct_pages, page_label
+from .pipeline import (MIN_SCAN_DPI, Correction, ItemReport, PageInput, correct_pages,
+                       low_resolution, page_label)
 from .report import (AUTOMATIC_NAME, REPORT_NAME, drawing_image, save_results, score_row,
                      totals)
 from .scan import ScannedPage, load_pages, natural_key
@@ -152,6 +153,18 @@ def open_path(path: Path) -> None:
         subprocess.Popen(["open", str(path)])
     else:
         subprocess.Popen(["xdg-open", str(path)])
+
+
+def review_state(report: ItemReport) -> tuple[str, tuple[str, ...]]:
+    """Colonne « À vérifier » d'un item et couleur de sa ligne. Les critères dont
+    une mesure est proche du seuil sont nommés (« ⚠ B F ») ; « ⚠ oui » quand
+    seule une note du rapport le justifie (figure non reconnue, page devinée…)."""
+    if report.checked:
+        return "✓ vérifié", ("checked",)
+    if not report.to_review:
+        return "", ()
+    near = [code for code, criterion in report.result.criteria.items() if criterion.borderline]
+    return ("⚠ " + " ".join(near) if near else "⚠ oui"), ("review",)
 
 
 def item_page(report: Path, item: int) -> Path:
@@ -365,7 +378,8 @@ class App:
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         ttk.Label(parent, text="Double-cliquez sur un item pour voir son dessin et le détail "
-                  "des mesures. « ✎ » : note changée par l'ergothérapeute.",
+                  "des mesures. « ⚠ B » : mesure proche du seuil au critère B ; « ✎ » : note "
+                  "changée par l'ergothérapeute.",
                   style="Hint.TLabel", wraplength=640, justify="left").pack(anchor="w", pady=(4, 0))
         self.warnings = ttk.Label(parent, text="", style="Warn.TLabel", wraplength=640,
                                   justify="left")
@@ -570,12 +584,16 @@ class App:
         if row.status is None:
             return
         problem = self._row_problem(row)
+        low = f" ⚠ {low_resolution(row.dpi()).capitalize()}." if (
+            row.dpi() is not None and row.dpi() < MIN_SCAN_DPI) else ""
         if problem:
             row.status.configure(text=f"⚠ {problem}", style="Warn.TLabel")
         elif row.guessed_page:
             row.status.configure(text="⚠ Page devinée, à confirmer : une page manquante ou un "
                                  "scan seul rend le numéro incertain. Choisissez la page dans "
-                                 "la liste.", style="Warn.TLabel")
+                                 "la liste." + low, style="Warn.TLabel")
+        elif low:
+            row.status.configure(text="✓ Prête pour la correction." + low, style="Warn.TLabel")
         else:
             row.status.configure(text="✓ Prête pour la correction", style="Ok.TLabel")
         self._update_status()
@@ -646,10 +664,7 @@ class App:
                 value = row[field] or empty
                 return f"{value} ✎" if row[field] != auto[field] else value
 
-            if report.checked:
-                state, tags = "✓ vérifié", ("checked",)
-            else:
-                state, tags = ("⚠ oui", ("review",)) if report.to_review else ("", ())
+            state, tags = review_state(report)
             values = [row["item"]] + [cell(f) for f in ("general", "motricite_A", "motricite_B",
                                                         "motricite_total", "global_C", "global_D",
                                                         "global_total")]

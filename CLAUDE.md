@@ -20,7 +20,8 @@ PR vers `main` et à chaque push sur `main` :
   `CHANGELOG.md` et, sur une PR, version supérieure à celle de `main`
   (`packaging/verifier_version.py`) ;
 - jobs `Tests Python 3.10 (Linux)`, `Tests Python 3.12 (Linux)` (sous
-  `xvfb-run`) et `Tests Python 3.12 (Windows)` : `pytest` ;
+  `xvfb-run`) et `Tests Python 3.12 (Windows)` : `pytest`, précédé de
+  `pyflakes` sous Linux en Python 3.12 ;
 - job `Exécutable Windows` (après les autres) : construit et teste
   `AutoCorrectNEPSY.exe`. Une nouvelle version arrivée sur `main` publie la
   Release `v<version>` avec l'exécutable ; une version déjà publiée n'est pas
@@ -33,6 +34,9 @@ PR vers `main` et à chaque push sur `main` :
 avant de committer. Si `main` a avancé entre-temps, reprendre la version
 suivante. Lors d'une exécution par le worker PlaniFiKateur, le worker augmente
 lui-même la version et complète le CHANGELOG : ne pas les modifier.
+
+Les actions GitHub sont épinglées par empreinte de commit (version en
+commentaire) ; les mettre à jour à la main.
 
 Ne pas committer `build/`, `dist/`, `*.egg-info/` ni `.venv/`.
 

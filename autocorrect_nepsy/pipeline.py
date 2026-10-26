@@ -20,6 +20,9 @@ from .strokes import Drawing, extract_drawing
 SEPARATOR_MM = {1: 200.0}
 SEPARATOR_DEFAULT_MM = 260.0
 SEPARATOR_TOLERANCE = 0.08
+# Résolution demandée pour les scans ; en dessous, la correction se fait quand
+# même mais les traits fins sont moins bien mesurés : avertissement.
+MIN_SCAN_DPI = 200
 
 
 @dataclass
@@ -83,6 +86,11 @@ class PageInput:
     guessed: bool = False  # numéro deviné sans certitude (voir identify.resolve)
 
 
+def low_resolution(dpi: float) -> str:
+    return (f"résolution de {dpi:.0f} dpi, sous les {MIN_SCAN_DPI} dpi demandés : mesures moins "
+            f"précises, scanner à {MIN_SCAN_DPI} dpi au moins (300 conseillés)")
+
+
 def page_label(number: int) -> str:
     items = ITEMS_BY_PAGE[number]
     return f"Page {number} (items {items[0]} à {items[-1]})"
@@ -115,6 +123,8 @@ def correct_pages(inputs: list[PageInput], ink: str = "bleu",
             doubts.append(f"échelle douteuse (trait de séparation de {separator_mm:.0f} mm), "
                           f"vérifier la résolution du scan ({page.scan.dpi:.0f} dpi)")
         correction.warnings.extend(f"{page.scan.source} : {doubt}" for doubt in doubts)
+        if page.scan.dpi < MIN_SCAN_DPI:
+            correction.warnings.append(f"{page.scan.source} : {low_resolution(page.scan.dpi)}")
         for zone in layout.zones:
             if zone.item not in SUPPORTED_ITEMS:
                 continue

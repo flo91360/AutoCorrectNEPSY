@@ -572,6 +572,24 @@ def test_item6_branches_at_most_75_degrees_from_horizontal(slope, general):
     assert scores(score(6, polyline(canvas(), [left, apex, right])))["G"] == general
 
 
+def test_borderline_margin_covers_measurement_and_reading_precision():
+    from autocorrect_nepsy.criteria.base import near_threshold
+
+    assert near_threshold(2.4, 2.0) and not near_threshold(2.6, 2.0)  # 0,5 mm au moins
+    assert near_threshold(71.3, 70.0) and not near_threshold(71.5, 70.0)  # 2 % d'une longueur
+    # Un angle ou un rapport ne dépend pas de l'échelle du scan : 2° et 3 % du rapport.
+    assert near_threshold(62.0, 60.0, "deg") and not near_threshold(62.5, 60.0, "deg")
+    assert near_threshold(1.265, 1.3, "ratio") and not near_threshold(1.25, 1.3, "ratio")
+
+
+@pytest.mark.parametrize("height, flagged", [(32.0, False), (31.25, True)])
+def test_item4_side_ratio_near_local_f_threshold_is_flagged(height, flagged):
+    # Rapport des côtés de 1,25:1 (à 0,05 du seuil de 1,3:1) ou de 1,28:1.
+    corners = [(12, 24), (52, 24), (52, 24 + height), (12, 24 + height)]
+    result = score(4, polyline(canvas(), corners, closed=True))
+    assert result.criteria["F"].met and result.to_review == flagged
+
+
 def test_failed_borderline_measure_is_flagged():
     # Angle au sommet de 81° : Global D échoue de peu, à vérifier.
     half = np.radians(81.0 / 2)
