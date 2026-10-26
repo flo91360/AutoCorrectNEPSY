@@ -40,6 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--encre", default="bleu", choices=sorted(INK_HUES),
                      help="couleur du stylo de l'enfant")
     run.add_argument("--dpi", type=float, help="résolution du scan si elle n'est pas lisible")
+    run.add_argument("--enfant", default="",
+                     help="pseudonyme ou initiales de l'enfant, repris dans le rapport")
+    run.add_argument("--passation", default="", help="date de passation, reprise dans le rapport")
 
     cmp = commands.add_parser("comparer", help="compare la correction automatique à celle de l'ergo")
     cmp.add_argument("automatique", type=Path, help="cotation.csv produit par « corriger »")
@@ -76,12 +79,14 @@ def main(argv: list[str] | None = None) -> int:
     except (LayoutError, ValueError) as error:
         print(f"Erreur : {error}", file=sys.stderr)
         return 1
+    correction.child, correction.session_date = args.enfant.strip(), args.passation.strip()
     save_results(correction, args.sortie)
     for source, number in correction.pages:
         print(f"{source} : {page_label(number)}")
     print()
     print(summary_text(correction))
-    print(f"\nRésultats écrits dans {args.sortie}/ (cotation.csv, rapport.html)")
+    print(f"\nRésultats écrits dans {args.sortie}/ (cotation.csv, cotation_automatique.csv, "
+          "rapport.html)")
     return 0
 
 

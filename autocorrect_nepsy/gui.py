@@ -11,6 +11,7 @@ import html
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import tempfile
@@ -27,12 +28,13 @@ from PIL import Image, ImageDraw, ImageTk
 
 from . import __version__
 from .compare import format_comparison, pair_scores, read_flags, read_scores
-from .criteria import SUPPORTED_ITEMS
+from .criteria import CODES, PROCESS_NAMES, SUPPORTED_ITEMS
 from .ink import INK_HUES
 from .identify import resolve
 from .layout import ITEMS_BY_PAGE, LayoutError, PreparedPage, prepare_page
-from .pipeline import Correction, PageInput, correct_pages, page_label
-from .report import save_results, score_row, totals
+from .pipeline import Correction, ItemReport, PageInput, correct_pages, page_label
+from .report import (AUTOMATIC_NAME, REPORT_NAME, drawing_image, save_results, score_row,
+                     totals)
 from .scan import ScannedPage, load_pages, natural_key
 
 APP_NAME = "AutoCorrect NEPSY"
@@ -40,7 +42,9 @@ SCAN_TYPES = [("Scans (PDF, images)", "*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.b
               ("Tous les fichiers", "*.*")]
 PAGE_LABELS = {page_label(number): number for number in ITEMS_BY_PAGE}
 THUMB_WIDTH = 180
+REVIEW_IMAGE = 360  # taille maximale du dessin dans la fenêtre de vérification
 REVIEW_COLOR = "#fde7c4"
+CHECKED_COLOR = "#e3f4e3"
 TOTAL_COLOR = "#e8eef8"
 HELP_TEXT = f"""Comment corriger un protocole
 
@@ -50,9 +54,11 @@ HELP_TEXT = f"""Comment corriger un protocole
 
 3. Vérifiez pour chaque scan la page du cahier proposée (les numéros d'items sont imprimés sur la vignette) et sa résolution. Une page « à confirmer » (page manquante, scan seul) est à choisir dans la liste.
 
-4. Cliquez sur « Lancer la correction automatique ».
+4. Indiquez si vous le souhaitez le pseudonyme ou les initiales de l'enfant et la date de passation (repris dans le rapport), puis cliquez sur « Lancer la correction automatique ».
 
-Les notes s'affichent à droite. Les lignes surlignées sont « à vérifier » : une mesure est proche d'un seuil, le dessin est ambigu ou la figure du modèle n'y a pas été retrouvée. Le rapport détaillé montre chaque dessin et les mesures qui justifient chaque note. Les résultats sont enregistrés dans un dossier « Correction NEPSY » à côté des scans.
+5. Les notes s'affichent à droite. Les lignes surlignées sont « à vérifier » : une mesure est proche d'un seuil, le dessin est ambigu ou la figure du modèle n'y a pas été retrouvée. Sélectionnez un item et cliquez sur « Vérifier / corriger l'item sélectionné… » pour confirmer ou changer ses notes. Le rapport détaillé montre chaque dessin et les mesures qui justifient chaque note.
+
+Les résultats sont enregistrés dans un dossier « Correction NEPSY » à côté des scans : cotation.csv (notes retenues, vos corrections comprises), cotation_automatique.csv (proposition de l'outil) et rapport.html. Ils sont réenregistrés à chaque vérification.
 
 L'enfant doit dessiner au stylo de couleur (bleu par défaut). Les annotations au crayon à papier sont ignorées.
 
@@ -98,13 +104,23 @@ def app_icon(size: int = 256) -> Image.Image:
     return image
 
 
-def results_folder(first_scan: Path) -> Path:
-    """Nouveau dossier de résultats daté, à côté des scans (ou dans Documents).
+def folder_label(text: str) -> str:
+    """Texte saisi (pseudonyme) réduit à un morceau de nom de dossier valide
+    sous Windows : sans caractère interdit, ni espaces en trop. Il est toujours
+    suivi de la date, un point final reste donc permis."""
+    text = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", text)
+    return " ".join(text.split())[:40].strip()
+
+
+def results_folder(first_scan: Path, label: str = "") -> Path:
+    """Nouveau dossier de résultats daté, à côté des scans (ou dans Documents),
+    avec ``label`` (pseudonyme de l'enfant) dans son nom.
 
     Un dossier existant n'est jamais réutilisé : deux corrections lancées dans
     la même minute (deux enfants) ne s'écrasent pas.
     """
-    name = f"Correction NEPSY {datetime.now():%Y-%m-%d %Hh%M}"
+    label = folder_label(label)
+    name = f"Correction NEPSY {label + ' ' if label else ''}{datetime.now():%Y-%m-%d %Hh%M}"
     for base in (first_scan.parent, Path.home() / "Documents" / "AutoCorrectNEPSY", Path.home()):
         try:
             base.mkdir(parents=True, exist_ok=True)
@@ -210,6 +226,12 @@ class App:
         self.correction: Correction | None = None
         self.output: Path | None = None
         self.ink_var = tk.StringVar(value="bleu")
+        self.child_var = tk.StringVar()
+        self.date_var = tk.StringVar()
+        # Fenêtre de vérification d'un item (une seule à la fois).
+        self.review_window: tk.Toplevel | None = None
+        self.review_report: ItemReport | None = None
+        self.review_vars: dict[str, tk.IntVar] = {}
         root.title(f"{APP_NAME} – Copie de figures (version {__version__})")
         root.geometry("1260x780")
         root.minsize(1100, 640)
@@ -301,6 +323,17 @@ class App:
             ttk.Radiobutton(options, text=color, value=color, variable=self.ink_var,
                             command=self.ink_changed).pack(side="left", padx=6)
 
+        child = ttk.Frame(parent)
+        child.pack(fill="x", pady=(6, 0))
+        for line, (text, var) in enumerate((("Enfant (pseudonyme ou initiales) :", self.child_var),
+                                            ("Date de passation :", self.date_var))):
+            ttk.Label(child, text=text).grid(row=line, column=0, sticky="w", pady=1)
+            ttk.Entry(child, textvariable=var, width=20).grid(row=line, column=1, sticky="w",
+                                                              padx=6, pady=1)
+        ttk.Label(child, text="Facultatif : repris dans le rapport et dans le nom du dossier "
+                  "des résultats.", style="Hint.TLabel").grid(row=2, column=0, columnspan=2,
+                                                              sticky="w")
+
         self.run_button = ttk.Button(parent, text="▶  Lancer la correction automatique",
                                      style="Big.TButton", command=self.run_correction,
                                      state="disabled")
@@ -323,20 +356,26 @@ class App:
             self.tree.heading(key, text=title)
             self.tree.column(key, width=width, minwidth=40, anchor="center", stretch=True)
         self.tree.tag_configure("review", background=REVIEW_COLOR)
+        self.tree.tag_configure("checked", background=CHECKED_COLOR)
         self.tree.tag_configure("total", background=TOTAL_COLOR)
         self.tree.bind("<Double-1>", self.open_item_report)
+        self.tree.bind("<Return>", self.review_item)
         scrollbar = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         ttk.Label(parent, text="Double-cliquez sur un item pour voir son dessin et le détail "
-                  "des mesures.", style="Hint.TLabel").pack(anchor="w", pady=(4, 0))
+                  "des mesures. « ✎ » : note changée par l'ergothérapeute.",
+                  style="Hint.TLabel", wraplength=640, justify="left").pack(anchor="w", pady=(4, 0))
         self.warnings = ttk.Label(parent, text="", style="Warn.TLabel", wraplength=640,
                                   justify="left")
         self.warnings.pack(fill="x", pady=(4, 0))
 
+        self.review_button = ttk.Button(parent, text="✎  Vérifier / corriger l'item sélectionné…",
+                                        command=self.review_item, state="disabled")
+        self.review_button.pack(anchor="w", pady=(8, 0))
         buttons = ttk.Frame(parent)
-        buttons.pack(fill="x", pady=(8, 0))
+        buttons.pack(fill="x", pady=(6, 0))
         self.report_button = ttk.Button(buttons, text="Ouvrir le rapport détaillé",
                                         command=self.open_report, state="disabled")
         self.report_button.pack(side="left")
@@ -572,12 +611,15 @@ class App:
                             row.guessed_page) for row in ready]
         ink = self.ink_var.get()
         first = ready[0].path
+        child, session_date = self.child_var.get().strip(), self.date_var.get().strip()
+        self._close_review()
 
         def task():
             correction = correct_pages(
                 inputs, ink, lambda i, n, src: self.worker.post(
                     self._progress, (i, n, f"Correction de {src}…" if src else "Rapport…")))
-            folder = results_folder(first)
+            correction.child, correction.session_date = child, session_date
+            folder = results_folder(first, child)
             save_results(correction, folder)
             return correction, folder
 
@@ -585,33 +627,124 @@ class App:
         self.worker.run(task, self._corrected, self._failed)
 
     def _corrected(self, result) -> None:
-        self._set_busy(False)
         self.correction, self.output = result
+        self._set_busy(False)
+        self._fill_tree()
+        self.warnings.configure(text="\n".join(f"⚠ {w}" for w in self.correction.warnings))
+        for button in (self.report_button, self.folder_button, self.compare_button):
+            button.configure(state="normal")
+        self.status.configure(text="Correction terminée.")
+
+    def _fill_tree(self) -> None:
+        """Tableau des notes retenues et résumé, après la correction ou une vérification."""
+        selected = self.tree.selection()
         self.tree.delete(*self.tree.get_children())
         for report in self.correction.items:
-            row = score_row(report)
-            review = report.result.to_review
-            values = [row["item"], row["general"], row["motricite_A"], row["motricite_B"],
-                      row["motricite_total"], row["global_C"], row["global_D"],
-                      row["global_total"], row["local_E"] or "–", row["local_F"] or "–",
-                      row["local_total"] or "–", "⚠ oui" if review else ""]
-            self.tree.insert("", "end", iid=str(report.item), values=values,
-                             tags=("review",) if review else ())
+            row, auto = score_row(report), score_row(report, automatic=True)
+
+            def cell(field: str, empty: str = "") -> str:
+                value = row[field] or empty
+                return f"{value} ✎" if row[field] != auto[field] else value
+
+            if report.checked:
+                state, tags = "✓ vérifié", ("checked",)
+            else:
+                state, tags = ("⚠ oui", ("review",)) if report.to_review else ("", ())
+            values = [row["item"]] + [cell(f) for f in ("general", "motricite_A", "motricite_B",
+                                                        "motricite_total", "global_C", "global_D",
+                                                        "global_total")]
+            values += [cell(f, "–") for f in ("local_E", "local_F", "local_total")] + [state]
+            self.tree.insert("", "end", iid=str(report.item), values=values, tags=tags)
         if self.correction.items:
             sums = totals(self.correction)
             self.tree.insert("", "end", iid="total", tags=("total",), values=[
                 "Total", sums["general"], "", "", sums["motricite"], "", "", sums["global"],
                 "", "", sums["local"], ""])
+        self.tree.selection_set([iid for iid in selected if self.tree.exists(iid)])
         items = [report.item for report in self.correction.items]
-        to_review = sum(report.result.to_review for report in self.correction.items)
+        to_review = sum(report.to_review for report in self.correction.items)
+        checked = sum(report.checked for report in self.correction.items)
+        done = f", {checked} vérifié(s) par vous (en vert)" if checked else ""
         self.summary.configure(
             text=f"{len(items)} item(s) corrigé(s) ({', '.join(map(str, items))}), dont "
-                 f"{to_review} à vérifier (surlignés en orange).\nRésultats enregistrés dans le "
-                 f"dossier « {self.output.name} », à côté des scans.")
-        self.warnings.configure(text="\n".join(f"⚠ {w}" for w in self.correction.warnings))
-        for button in (self.report_button, self.folder_button, self.compare_button):
-            button.configure(state="normal")
-        self.status.configure(text="Correction terminée.")
+                 f"{to_review} à vérifier (surlignés en orange){done}.\nRésultats enregistrés "
+                 f"dans le dossier « {self.output.name} », à côté des scans.")
+
+    # -- vérification par l'ergothérapeute -------------------------------------
+    def review_item(self, event=None) -> None:
+        """Fenêtre de vérification de l'item sélectionné : chaque note est
+        confirmée ou changée, puis les résultats sont réenregistrés."""
+        if self.correction is None or self.busy:
+            return
+        selected = next(iter(self.tree.selection()), "")
+        report = next((r for r in self.correction.items if str(r.item) == selected), None)
+        if report is None:
+            messagebox.showinfo(APP_NAME, "Sélectionnez d'abord un item dans le tableau.")
+            return
+        self._close_review()
+        window = tk.Toplevel(self.root)
+        window.title(f"Item {report.item} – vérifier la cotation")
+        window.transient(self.root)
+        window.protocol("WM_DELETE_WINDOW", self._close_review)
+        self.review_window, self.review_report = window, report
+        frame = ttk.Frame(window, padding=12)
+        frame.pack(fill="both", expand=True)
+
+        image = drawing_image(report)
+        scale = min(1.0, REVIEW_IMAGE / max(image.shape[:2]))
+        small = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        window.photo = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(small, cv2.COLOR_BGR2RGB)))
+        tk.Label(frame, image=window.photo, borderwidth=1, relief="solid").grid(
+            row=0, column=0, rowspan=2, sticky="nw", padx=(0, 12))
+
+        ttk.Label(frame, text=f"Item {report.item} : note retenue pour chaque critère",
+                  style="Step.TLabel").grid(row=0, column=1, sticky="w")
+        grid = ttk.Frame(frame)
+        grid.grid(row=1, column=1, sticky="nw", pady=(8, 0))
+        self.review_vars = {}
+        for line, code in enumerate(c for c in CODES if c in report.result.criteria):
+            criterion = report.result.criteria[code]
+            var = tk.IntVar(value=report.score(code))
+            self.review_vars[code] = var
+            ttk.Label(grid, text=PROCESS_NAMES[code]).grid(row=line, column=0, sticky="w")
+            for column, value in ((1, 0), (2, 1)):
+                ttk.Radiobutton(grid, text=str(value), value=value, variable=var).grid(
+                    row=line, column=column, padx=6)
+            automatic = f"outil : {criterion.score}" + (" (limite)" if criterion.borderline else "")
+            ttk.Label(grid, text=automatic, style="Hint.TLabel").grid(row=line, column=3, sticky="w")
+        if report.result.notes:
+            ttk.Label(frame, text="\n".join(f"⚠ {note}" for note in report.result.notes),
+                      style="Warn.TLabel", wraplength=REVIEW_IMAGE + 280, justify="left").grid(
+                row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=3, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(buttons, text="Voir le détail des mesures",
+                   command=lambda: self._open_item(report.item)).pack(side="left")
+        ttk.Button(buttons, text="Annuler", command=self._close_review).pack(side="left", padx=6)
+        ttk.Button(buttons, text="✓ Valider ces notes",
+                   command=self._confirm_review).pack(side="left")
+
+    def _confirm_review(self) -> None:
+        report = self.review_report
+        if report is None:
+            return
+        report.review({code: var.get() for code, var in self.review_vars.items()})
+        self._close_review()
+        self._fill_tree()
+        correction, folder = self.correction, self.output
+        self._set_busy(True, f"Enregistrement de la vérification de l'item {report.item}…")
+        self.worker.run(lambda: save_results(correction, folder),
+                        lambda _paths: self._review_saved(report), self._failed)
+
+    def _review_saved(self, report: ItemReport) -> None:
+        self._set_busy(False)
+        self.status.configure(text=f"Item {report.item} vérifié, résultats réenregistrés.")
+
+    def _close_review(self) -> None:
+        if self.review_window is not None:
+            self.review_window.destroy()
+        self.review_window, self.review_report, self.review_vars = None, None, {}
 
     def _progress(self, value) -> None:
         index, total, text = value
@@ -624,6 +757,8 @@ class App:
         state = "disabled" if busy else "normal"
         for button in (self.add_button, self.clear_button):
             button.configure(state=state)
+        self.review_button.configure(
+            state="normal" if not busy and self.correction is not None else "disabled")
         if busy:
             self.run_button.configure(state="disabled")
             self.progress.configure(value=0)
@@ -655,19 +790,21 @@ class App:
 
     def open_report(self) -> None:
         if self.output:
-            self._open(self.output / "rapport.html")
+            self._open(self.output / REPORT_NAME)
 
     def open_item_report(self, event=None) -> None:
-        if not self.output:
-            return
         # La ligne sous la souris, sinon la ligne sélectionnée.
         row = self.tree.identify_row(event.y) if event is not None else ""
         row = row or next(iter(self.tree.selection()), "")
-        if not row.isdigit():
+        if row.isdigit():
+            self._open_item(int(row))
+
+    def _open_item(self, item: int) -> None:
+        if not self.output:
             return
-        report = self.output / "rapport.html"
+        report = self.output / REPORT_NAME
         try:
-            page = item_page(report, int(row))
+            page = item_page(report, item)
         except OSError:
             page = report  # dossier temporaire inaccessible : rapport en entier
         self._open(page)
@@ -685,7 +822,8 @@ class App:
         if not name:
             return
         try:
-            auto = self.output / "cotation.csv"
+            # Proposition de l'outil, avant les corrections : c'est elle qu'on évalue.
+            auto = self.output / AUTOMATIC_NAME
             flags = read_flags(auto)
             text = format_comparison(pair_scores(read_scores(auto), read_scores(name), flags),
                                      flags_known=flags is not None)

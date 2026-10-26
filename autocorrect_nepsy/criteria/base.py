@@ -73,22 +73,6 @@ class ItemResult:
         criterion = self.criteria.get(code)
         return None if criterion is None else criterion.score
 
-    def total(self, *codes: str) -> int | None:
-        scores = [self.score(code) for code in codes]
-        return None if any(s is None for s in scores) else sum(scores)
-
-    @property
-    def motricite(self) -> int | None:
-        return self.total("A", "B")
-
-    @property
-    def global_(self) -> int | None:
-        return self.total("C", "D")
-
-    @property
-    def local(self) -> int | None:
-        return self.total("E", "F")
-
     @property
     def to_review(self) -> bool:
         """L'ergothérapeute devrait vérifier cet item."""
