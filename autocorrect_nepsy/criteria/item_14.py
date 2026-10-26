@@ -17,12 +17,27 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import STEP_MM, Drawing, StraightLine
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .shapes import EXTRA_ELEMENT_MM
 
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+MOTOR_MAX_CHANGES = threshold(3, "A", "changements de direction par côté, au plus", "nombre")
+STRAIGHT_BAND_MM = threshold(2.0, "B", "largeur de la barre grisée où tient chaque côté")
+# Un côté rejoint l'arrière ou l'ellipse : sert aussi à repérer la jonction.
+MEET_MM = threshold(1.0, "G", "intervalle entre un côté et l'arrière ou l'ellipse, au plus")
+SIDES_RANGE_DEG = (threshold(30.0, "GC", "angle de chaque côté avec l'horizontale, au moins",
+                             "deg"),
+                   threshold(60.0, "GC", "angle de chaque côté avec l'horizontale, au plus",
+                             "deg"))
+LENGTH_WIDTH_RANGE = (threshold(1.5, "D", "rapport de la longueur à la largeur, au moins", "ratio"),
+                      threshold(2.0, "D", "rapport de la longueur à la largeur, au plus", "ratio"))
+LOCAL_MIN_ELLIPSE_RATIO = threshold(1.2, "F", "rapport du grand au petit diamètre de l'ellipse "
+                                    "avant, au moins (une ellipse, pas un cercle)", "ratio")
+LOCAL_MAX_SIDES_RATIO = threshold(1.2, "F", "rapport du plus long au plus court côté, au plus",
+                                  "ratio")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 WOBBLE_MM = 0.8  # amplitude d'une ondulation de la main (Motricité A)
-MOTOR_MAX_CHANGES = 3  # Motricité A, par côté
-STRAIGHT_BAND_MM = 2.0  # Motricité B : barre grisée de 2 mm
 SIDE_FIT_MM = 1.5  # point d'un côté : à moins de cette distance de sa droite
 PROFILE_STEP_MM = 0.6  # pas du profil moyen d'un côté (trait repassé compris)
 # Le tracé d'un côté suit sa droite ; aux bouts, l'arrière et l'ellipse qui le
@@ -30,13 +45,8 @@ PROFILE_STEP_MM = 0.6  # pas du profil moyen d'un côté (trait repassé compris
 SIDE_PARALLEL_DEG = 30.0
 SIDE_GAP_MM = 2.0  # interruption tolérée le long d'un côté
 SIDE_MIN_FRACTION = 0.3  # un côté couvre au moins cette part de la longueur
-MEET_MM = 1.0  # un côté rejoint l'arrière ou l'ellipse (Général : intervalle ≤ 1 mm)
-SIDES_RANGE_DEG = (30.0, 60.0)  # Général et Global C
 BACK_BULGE_MM = 1.0  # arrière incurvé vers l'extérieur d'au moins cette flèche
 DISTORTION_MAX_SPREAD = 0.15  # irrégularité du rayon de l'ellipse (bosses, angles)
-LENGTH_WIDTH_RANGE = (1.5, 2.0)  # Global D
-LOCAL_MIN_ELLIPSE_RATIO = 1.2  # Local F : l'avant est une ellipse, pas un cercle
-LOCAL_MAX_SIDES_RATIO = 1.2  # Local F
 
 
 @dataclass
@@ -53,21 +63,13 @@ class Side:
 
 
 def score(drawing: Drawing, item: int = 14) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {}
-    marks: list = []
-    notes: list[str] = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+        return scoring.empty()
 
     def fail(reason: str, *failing: str) -> ItemResult:
-        not_recognized(checks, failing, reason, notes)
-        return result()
+        scoring.not_recognized(failing, reason)
+        return scoring.result()
 
     points = drawing.points
     tangents = _tangents(drawing)
@@ -81,8 +83,8 @@ def score(drawing: Drawing, item: int = 14) -> ItemResult:
     found = [_side(points, tangents, t, s, sign, span, drawing.stroke_width)
              for sign in (-1, 1)]
     sides_found = [f for f in found if f is not None]
-    checks["E"].add(len(sides_found) == 2, f"{len(sides_found)} côté(s) du cylindre représenté(s) "
-                    "(il en faut 2)")
+    scoring["E"].add(len(sides_found) == 2, f"{len(sides_found)} côté(s) du cylindre "
+                     "représenté(s) (il en faut 2)")
     if len(sides_found) < 2:
         return fail("forme cylindrique non reconnue (deux côtés droits attendus)",
                     "G", "A", "B", "C", "D", "F")
@@ -120,27 +122,28 @@ def score(drawing: Drawing, item: int = 14) -> ItemResult:
     descending = axis[1] > 0
     sides_ratio = max(s_.length for s_ in sides) / max(min(s_.length for s_ in sides), 1e-6)
     gaps = [g for s_ in sides for g in (s_.back_gap, s_.front_gap)]
-    measures.update({"largeur_mm": width, "longueur_mm": length, "rapport_longueur_largeur":
-                     length_ratio, "ellipse_grand_mm": e_major, "ellipse_petit_mm": e_minor,
-                     "fleche_arriere_mm": bulge, "rapport_cotes": sides_ratio,
-                     "intervalle_max_mm": max(gaps)})
+    scoring.measures.update({"largeur_mm": width, "longueur_mm": length,
+                             "rapport_longueur_largeur": length_ratio, "ellipse_grand_mm": e_major,
+                             "ellipse_petit_mm": e_minor, "fleche_arriere_mm": bulge,
+                             "rapport_cotes": sides_ratio, "intervalle_max_mm": max(gaps)})
 
     for side, angle in zip(sides, side_angles):
-        marks.append(mk.bande(side.line, f"côté {fmt(side.length)} · {angle:.0f}°"))
-    marks.append(mk.segment(e_center - e_major_axis * e_major / 2,
-                            e_center + e_major_axis * e_major / 2,
-                            f"ellipse {fmt(e_major, '')} × {fmt(e_minor)}"))
+        scoring.marks.append(mk.bande(side.line, f"côté {fmt(side.length)} · {angle:.0f}°"))
+    scoring.marks.append(mk.segment(e_center - e_major_axis * e_major / 2,
+                                    e_center + e_major_axis * e_major / 2,
+                                    f"ellipse {fmt(e_major, '')} × {fmt(e_minor)}"))
     if apex is not None:
-        marks.append(mk.point(apex, f"arrière {'+' if bulge >= 0 else '−'}{fmt(abs(bulge))}"))
-        marks.append(mk.cote(apex, apex + axis * length, f"longueur {fmt(length)}",
-                             side=-across))
+        scoring.marks.append(mk.point(apex, f"arrière {'+' if bulge >= 0 else '−'}"
+                                            f"{fmt(abs(bulge))}"))
+        scoring.marks.append(mk.cote(apex, apex + axis * length, f"longueur {fmt(length)}",
+                                     side=-across))
     for side in sides:
         for gap, at in ((side.back_gap, side.meets_back), (side.front_gap, side.meets_front)):
             if gap > 0.5:
-                marks.append(mk.point(at, f"intervalle {fmt(gap)}"))
+                scoring.marks.append(mk.point(at, f"intervalle {fmt(gap)}"))
 
     lo, hi = SIDES_RANGE_DEG
-    general = checks["G"]
+    general = scoring["G"]
     general.add(True, "forme cylindrique (deux côtés, un arrière, une ellipse avant)")
     general.add(descending, "inclinée vers le bas de gauche à droite" if descending
                 else "inclinée vers le haut de gauche à droite")
@@ -149,42 +152,47 @@ def score(drawing: Drawing, item: int = 14) -> ItemResult:
                 f"{e_spread * 100:.0f} %, au plus {DISTORTION_MAX_SPREAD * 100:.0f} %)")
     general.add(bulge >= BACK_BULGE_MM, f"arrière incurvé vers l'extérieur (flèche {fmt(bulge)})")
     general.limit(max(gaps), f"plus grand intervalle entre un côté et l'arrière ou l'ellipse "
-                  f"{fmt(max(gaps))} ≤ 1 mm", high=MEET_MM)
+                  f"{fmt(max(gaps))} ≤ {MEET_MM.text}", high=MEET_MM)
     for angle in side_angles:
-        general.limit(angle, f"côté à {angle:.0f}° de l'horizontale (entre 30° et 60°)",
+        general.limit(angle, f"côté à {angle:.0f}° de l'horizontale (entre {lo.text} et "
+                      f"{hi.text})",
                       low=lo, high=hi, unit="deg")
 
     for side in sides:
         changes = geo.count_direction_changes(_profile(side.line), WOBBLE_MM)
-        checks["A"].add(changes <= MOTOR_MAX_CHANGES, f"côté de {fmt(side.length)} : {changes} "
-                        "changement(s) de direction (3 au plus)")
-        checks["B"].limit(side.line.width, f"côté de {fmt(side.length)} droit : bande de "
-                          f"{fmt(side.line.width)} ≤ 2 mm", high=STRAIGHT_BAND_MM)
+        scoring["A"].add(changes <= MOTOR_MAX_CHANGES, f"côté de {fmt(side.length)} : {changes} "
+                         f"changement(s) de direction ({MOTOR_MAX_CHANGES.text} au plus)")
+        scoring["B"].limit(side.line.width, f"côté de {fmt(side.length)} droit : bande de "
+                           f"{fmt(side.line.width)} ≤ {STRAIGHT_BAND_MM.text}",
+                           high=STRAIGHT_BAND_MM)
 
-    checks["C"].add(True, "forme cylindrique")
-    checks["C"].add(descending, "inclinée vers le bas de gauche à droite" if descending
-                    else "inclinée vers le haut de gauche à droite")
+    scoring["C"].add(True, "forme cylindrique")
+    scoring["C"].add(descending, "inclinée vers le bas de gauche à droite" if descending
+                     else "inclinée vers le haut de gauche à droite")
     for angle in side_angles:
-        checks["C"].limit(angle, f"côté à {angle:.0f}° de l'horizontale (entre 30° et 60°)",
-                          low=lo, high=hi, unit="deg")
+        scoring["C"].limit(angle, f"côté à {angle:.0f}° de l'horizontale (entre {lo.text} et "
+                           f"{hi.text})",
+                           low=lo, high=hi, unit="deg")
 
-    checks["D"].add(bulge >= BACK_BULGE_MM, f"arrière incurvé vers l'extérieur (flèche {fmt(bulge)})")
+    scoring["D"].add(bulge >= BACK_BULGE_MM,
+                     f"arrière incurvé vers l'extérieur (flèche {fmt(bulge)})")
     lo, hi = LENGTH_WIDTH_RANGE
-    checks["D"].limit(length_ratio, f"longueur {fmt(length)} / largeur {fmt(width)} : "
-                      f"{fmt_ratio(length_ratio)} (entre 1,5:1 et 2:1)", low=lo, high=hi,
-                      unit="ratio")
+    scoring["D"].limit(length_ratio, f"longueur {fmt(length)} / largeur {fmt(width)} : "
+                       f"{fmt_ratio(length_ratio)} (entre {lo.text} et {hi.text})", low=lo, high=hi,
+                       unit="ratio")
 
     extra = len(other_pts) * STEP_MM
     extras = ([extra] if extra >= EXTRA_ELEMENT_MM else []) + [
         size for size in drawing.component_sizes[1:] if size >= EXTRA_ELEMENT_MM]
-    checks["F"].add(not extras, "aucun autre élément" if not extras
-                    else f"{len(extras)} élément(s) en trop")
+    scoring["F"].add(not extras, "aucun autre élément" if not extras
+                     else f"{len(extras)} élément(s) en trop")
     e_ratio = e_major / max(e_minor, 1e-6)
-    checks["F"].limit(e_ratio, f"ellipse avant : grand / petit diamètre {fmt_ratio(e_ratio)} "
-                      "≥ 1,2:1", low=LOCAL_MIN_ELLIPSE_RATIO, unit="ratio")
-    checks["F"].limit(sides_ratio, f"plus long / plus court côté {fmt_ratio(sides_ratio)} "
-                      "≤ 1,2:1", high=LOCAL_MAX_SIDES_RATIO, unit="ratio")
-    return result()
+    scoring["F"].limit(e_ratio, f"ellipse avant : grand / petit diamètre {fmt_ratio(e_ratio)} "
+                       f"≥ {LOCAL_MIN_ELLIPSE_RATIO.text}", low=LOCAL_MIN_ELLIPSE_RATIO,
+                       unit="ratio")
+    scoring["F"].limit(sides_ratio, f"plus long / plus court côté {fmt_ratio(sides_ratio)} "
+                       f"≤ {LOCAL_MAX_SIDES_RATIO.text}", high=LOCAL_MAX_SIDES_RATIO, unit="ratio")
+    return scoring.result()
 
 
 def _tangents(drawing: Drawing) -> np.ndarray:

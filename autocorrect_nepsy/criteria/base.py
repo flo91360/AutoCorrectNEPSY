@@ -1,4 +1,5 @@
-"""Structures communes : critère, résultat d'un item, liste de vérifications."""
+"""Structures communes : seuils du manuel, critère, résultat d'un item, liste de
+vérifications et échafaudage de la cotation d'un item."""
 
 from __future__ import annotations
 
@@ -14,6 +15,51 @@ PROCESS_NAMES = {"G": "Général", "A": "Motricité A", "B": "Motricité B",
 # marge minimale qui tient compte de la précision du scan et du tracé.
 BORDERLINE_FRACTION = 0.05
 BORDERLINE_MIN = {"mm": 0.5, "deg": 2.0, "ratio": 0.03, "part": 0.02}
+THRESHOLD_UNITS = (*BORDERLINE_MIN, "nombre")
+
+
+class Threshold:
+    """Seuil chiffré du manuel, reformulé (jamais recopié). Le nombre s'emploie
+    tel quel dans les calculs et garde le ou les critères qu'il sert, son unité
+    et une description, pour la liste des seuils (``autocorrect-nepsy seuils``).
+
+    Les autres constantes des modules d'items sont des réglages internes de
+    l'outil (reconnaissance des figures, tolérances de mesure), absents du manuel.
+    """
+
+    codes: str
+    unit: str
+    description: str
+    module: str
+
+    @property
+    def text(self) -> str:
+        """Valeur telle qu'écrite dans les textes de cotation (voir ``fmt_limit``)."""
+        return fmt_limit(self, self.unit)
+
+
+class FloatThreshold(Threshold, float):
+    pass
+
+
+class IntThreshold(Threshold, int):
+    pass
+
+
+def manual_thresholds(module: str):
+    """Fabrique des seuils du manuel d'un module d'item, à créer une fois en tête
+    du module : ``threshold = manual_thresholds(__name__)``, puis par exemple
+    ``MAX_RATIO = threshold(2.0, "G", "rapport des côtés, au plus", "ratio")``."""
+    def threshold(value: float, codes: str, description: str,
+                  unit: str = "mm") -> FloatThreshold | IntThreshold:
+        if not codes or any(code not in CODES for code in codes):
+            raise ValueError(f"critère(s) inconnu(s) : {codes!r}")
+        if unit not in THRESHOLD_UNITS:
+            raise ValueError(f"unité inconnue : {unit!r}")
+        made = IntThreshold(value) if isinstance(value, int) else FloatThreshold(value)
+        made.codes, made.description, made.unit, made.module = codes, description, unit, module
+        return made
+    return threshold
 
 
 @dataclass
@@ -95,6 +141,38 @@ def not_recognized(checks: dict[str, Checks], codes: Iterable[str], reason: str,
     notes.append(unrecognized_note(reason))
 
 
+class Scoring:
+    """Échafaudage commun de la cotation d'un item : les conditions de chaque
+    critère (``scoring["A"]``), les mesures, les notes « à vérifier » et les
+    repères de mesure, réunis en ``ItemResult`` par ``result()``. Le dessin vide
+    et la figure non reconnue sont traités ici, de la même façon pour tous les
+    items."""
+
+    def __init__(self, item: int, codes: Iterable[str]):
+        self.item = item
+        self.codes = tuple(codes)
+        self.checks = {code: Checks() for code in self.codes}
+        self.measures: dict[str, float] = {}
+        self.notes: list[str] = []
+        self.marks: list = []
+
+    def __getitem__(self, code: str) -> Checks:
+        return self.checks[code]
+
+    def empty(self, reason: str = "aucun tracé dans la zone") -> ItemResult:
+        """Pas de dessin exploitable : tous les critères à 0, item à vérifier."""
+        return empty_result(self.item, self.codes, reason)
+
+    def not_recognized(self, codes: Iterable[str], reason: str) -> None:
+        """Voir ``not_recognized`` : les critères ``codes`` échouent, item à vérifier."""
+        not_recognized(self.checks, codes, reason, self.notes)
+
+    def result(self) -> ItemResult:
+        return ItemResult(self.item, {code: self.checks[code].criterion(code)
+                                      for code in self.codes},
+                          self.measures, self.notes, self.marks)
+
+
 def unrecognized_note(reason: str) -> str:
     return f"{reason} : vérifier la cotation, l'outil a pu mal lire le dessin"
 
@@ -103,6 +181,15 @@ def fmt(value: float, unit: str = "mm") -> str:
     """Nombre au format français (virgule décimale)."""
     text = f"{value:.1f}".replace(".", ",")
     return f"{text} {unit}" if unit else text
+
+
+def fmt_limit(value: float, unit: str = "mm") -> str:
+    """Seuil tel qu'écrit dans les textes de cotation, sans zéro inutile :
+    « 70 mm », « 1,5 mm », « 30° », « 1,3:1 », « 50 % », « 3 »."""
+    value = round(float(value) * 100, 1) if unit == "part" else float(value)
+    number = f"{value:g}".replace(".", ",")
+    return {"mm": f"{number} mm", "deg": f"{number}°", "ratio": f"{number}:1",
+            "part": f"{number} %"}.get(unit, number)
 
 
 def fmt_ratio(value: float) -> str:

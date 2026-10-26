@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Callable
+import sys
+from typing import Callable, NamedTuple
 
 from ..strokes import Drawing
 from . import (item_01_02, item_03, item_04, item_05, item_06, item_07, item_08, item_09,
                item_10, item_11, item_12, item_13, item_14, item_15, item_16,
                item_17, item_18, item_19, item_20, item_21)
-from .base import CODES, PROCESS_NAMES, Criterion, ItemResult
+from .base import CODES, PROCESS_NAMES, Criterion, ItemResult, Threshold
 
 SCORERS: dict[int, Callable[[Drawing, int], ItemResult]] = {
     1: item_01_02.score,
@@ -43,4 +44,24 @@ def score_item(item: int, drawing: Drawing) -> ItemResult:
     return SCORERS[item](drawing, item)
 
 
-__all__ = ["CODES", "PROCESS_NAMES", "Criterion", "ItemResult", "SUPPORTED_ITEMS", "score_item"]
+class ManualThreshold(NamedTuple):
+    items: tuple[int, ...]  # items notés par le module qui déclare le seuil
+    name: str  # nom de la constante dans le module
+    threshold: Threshold
+
+
+def all_manual_thresholds() -> list[ManualThreshold]:
+    """Seuils du manuel déclarés par les modules d'items, dans l'ordre des items
+    puis de leur déclaration (une plage compte pour deux seuils)."""
+    found = []
+    for module in dict.fromkeys(sys.modules[f.__module__] for f in SCORERS.values()):
+        items = tuple(i for i, f in SCORERS.items() if f.__module__ == module.__name__)
+        for name, value in vars(module).items():
+            values = value if isinstance(value, tuple) else (value,)
+            found += [ManualThreshold(items, name, v) for v in values
+                      if isinstance(v, Threshold) and v.module == module.__name__]
+    return found
+
+
+__all__ = ["CODES", "PROCESS_NAMES", "Criterion", "ItemResult", "ManualThreshold",
+           "SUPPORTED_ITEMS", "all_manual_thresholds", "score_item"]

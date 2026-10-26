@@ -18,62 +18,61 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import STEP_MM, Drawing, StraightLine
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .ellipses import Ellipse, concentric, crosses, find_ellipses, straightest, tangents
 from .shapes import EXTRA_ELEMENT_MM, separate_extras
 
-JOIN_MM = 1.0  # Général et Motricité A : intervalle aux jonctions
-GAP_MM = 1.0  # Motricité A : intervalle dans une ellipse
-STRAIGHT_MAX_MM = 7.0  # Motricité B : portion d'ellipse droite
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+JOIN_MM = threshold(1.0, "GA", "intervalle aux jonctions des verticales, au plus")
+GAP_MM = threshold(1.0, "A", "intervalle dans une ellipse, au plus")
+STRAIGHT_MAX_MM = threshold(7.0, "B", "portion droite d'une ellipse, au plus")
+RING_MAX_MM = threshold(1.0, "GE", "entrée de l'ellipse de base dans l'anneau du haut, au plus")
+MIN_OVERLAP_MM = threshold(2.0, "C", "chevauchement de la base et de l'ellipse interne, au moins")
+AXIS_MAX_DEG = threshold(5.0, "D", "écart des axes de chaque ellipse à l'horizontale et à la "
+                         "verticale, au plus", "deg")
+GLOBAL_MAX_MINOR_RATIO = threshold(1.2, "D", "rapport des petits axes de l'ellipse externe et de "
+                                   "la base, au plus", "ratio")
+LOCAL_MAX_AXIS_RATIO = threshold(1.4, "F", "rapport des axes de l'ellipse externe à ceux de "
+                                 "l'interne, au plus", "ratio")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 DISTORTION_MAX_SPREAD = 0.08  # irrégularité du rayon d'une ellipse (bosses, angles)
-RING_MAX_MM = 1.0  # Général et Local E : l'ellipse de base entre dans l'anneau du haut
 VERTICAL_MAX_DEG = 25.0  # lignes verticales
 VERTICAL_NEAR_MM = 6.0  # une verticale part du côté de l'ellipse externe
 ON_ELLIPSE_MM = 1.2  # point d'une ellipse (pas d'une verticale)
 ON_LINE_MM = 1.0  # point d'une verticale ou de son prolongement (pas d'une ellipse)
 LINE_EXTENSION_MM = 6.0
-MIN_OVERLAP_MM = 2.0  # Global C : chevauchement base / ellipse interne
 HORIZONTAL_LOOSE_DEG = 20.0  # Global C : grands axes « relativement » horizontaux
-AXIS_MAX_DEG = 5.0  # Global D
-GLOBAL_MAX_MINOR_RATIO = 1.2  # Global D : petits axes externe / base
 CIRCLE_MAX_RATIO = 1.1  # Local E et F : en deçà, c'est un cercle et non une ellipse
-LOCAL_MAX_AXIS_RATIO = 1.4  # Local F : externe / interne
 RASTER_PX_PER_MM = 8.0
 ON_FIGURE_MM = 2.0
 
 
 def score(drawing: Drawing, item: int = 19) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {}
-    marks: list = []
-    notes: list[str] = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+        return scoring.empty()
 
     found = _bucket(drawing)
     if found is None:
-        reason = "cylindre non reconnu (deux ellipses concentriques au-dessus d'une ellipse de base)"
-        not_recognized(checks, codes, reason, notes)
-        return result()
+        reason = ("cylindre non reconnu (deux ellipses concentriques au-dessus d'une ellipse "
+                  "de base)")
+        scoring.not_recognized(scoring.codes, reason)
+        return scoring.result()
     outer, inner, base = found
     ellipses = {"supérieure externe": outer, "supérieure interne": inner, "de base": base}
     verticals = _verticals(drawing, [outer, inner, base], outer, base)
     for color, (name, e) in enumerate(ellipses.items()):
-        marks.append(mk.trace(e.at(np.linspace(0, 2 * np.pi, 120)), f"ellipse {name}", color))
-        marks.append(mk.segment(e.center - e.major_axis * e.major / 2,
-                                e.center + e.major_axis * e.major / 2,
-                                f"{fmt(e.major, '')} × {fmt(e.minor)} · {_tilt(e):.0f}°"))
+        scoring.marks.append(mk.trace(e.at(np.linspace(0, 2 * np.pi, 120)), f"ellipse {name}",
+                                      color))
+        scoring.marks.append(mk.segment(e.center - e.major_axis * e.major / 2,
+                                        e.center + e.major_axis * e.major / 2,
+                                        f"{fmt(e.major, '')} × {fmt(e.minor)} · {_tilt(e):.0f}°"))
     for line in verticals:
-        marks.append(mk.bande(line, f"verticale {fmt(line.length)}", at="bout"))
-    measures.update({f"{k}_grand_mm": e.major for k, e in (("externe", outer), ("interne", inner),
-                                                          ("base", base))})
-    measures.update({f"{k}_petit_mm": e.minor for k, e in (("externe", outer), ("interne", inner),
-                                                          ("base", base))})
+        scoring.marks.append(mk.bande(line, f"verticale {fmt(line.length)}", at="bout"))
+    named = (("externe", outer), ("interne", inner), ("base", base))
+    scoring.measures.update({f"{k}_grand_mm": e.major for k, e in named})
+    scoring.measures.update({f"{k}_petit_mm": e.minor for k, e in named})
 
     # Jonctions des verticales avec l'ellipse externe (haut) et la base (bas).
     joins = []
@@ -84,70 +83,72 @@ def score(drawing: Drawing, item: int = 19) -> ItemResult:
     ring = _ring_depth(base, outer, inner)
     crossing = crosses(base, outer) and crosses(base, inner)
     distorted = [n for n, e in ellipses.items() if e.spread > DISTORTION_MAX_SPREAD]
-    measures.update({"jonction_max_mm": join, "base_dans_anneau_mm": ring})
+    scoring.measures.update({"jonction_max_mm": join, "base_dans_anneau_mm": ring})
 
-    general = checks["G"]
+    general = scoring["G"]
     general.add(len(verticals) == 2, f"cylindre : trois ellipses reliées par {len(verticals)} "
                 "verticale(s) (deux attendues)")
     general.add(not distorted, "ellipses sans distorsion majeure" if not distorted
                 else f"distorsion de l'ellipse {', '.join(distorted)}")
     general.add(base.center[1] > inner.center[1], "deux ellipses concentriques au-dessus de "
                 "l'ellipse de base")
-    general.limit(join, f"plus grand intervalle aux jonctions des verticales {fmt(join)} ≤ 1 mm",
-                  high=JOIN_MM)
+    general.limit(join, f"plus grand intervalle aux jonctions des verticales {fmt(join)} ≤ "
+                  f"{JOIN_MM.text}", high=JOIN_MM)
     general.add(crossing, "l'ellipse de base recoupe les deux ellipses du haut" if crossing
                 else "l'ellipse de base ne recoupe pas les deux ellipses du haut")
-    general.limit(ring, f"l'ellipse de base entre de {fmt(ring)} dans l'anneau du haut (≤ 1 mm)",
-                  high=RING_MAX_MM)
+    general.limit(ring, f"l'ellipse de base entre de {fmt(ring)} dans l'anneau du haut "
+                  f"(≤ {RING_MAX_MM.text})", high=RING_MAX_MM)
 
     gaps = {n: _gap(e, base is e, outer) for n, e in ellipses.items()}
     worst_gap = max(gaps.values())
-    checks["A"].limit(worst_gap, f"plus grand intervalle dans une ellipse {fmt(worst_gap)} ≤ 1 mm",
-                      high=GAP_MM)
-    checks["A"].limit(join, f"plus grand intervalle aux jonctions des verticales {fmt(join)} "
-                      "≤ 1 mm", high=JOIN_MM)
+    scoring["A"].limit(worst_gap, f"plus grand intervalle dans une ellipse {fmt(worst_gap)} ≤ "
+                       f"{GAP_MM.text}", high=GAP_MM)
+    scoring["A"].limit(join, f"plus grand intervalle aux jonctions des verticales {fmt(join)} "
+                       f"≤ {JOIN_MM.text}", high=JOIN_MM)
     straight = max(straightest(_without(e, verticals)) for e in ellipses.values())
-    measures["portion_droite_max_mm"] = straight
-    checks["B"].limit(straight, f"plus longue portion droite d'ellipse {fmt(straight)} ≤ 7 mm",
-                      high=STRAIGHT_MAX_MM)
+    scoring.measures["portion_droite_max_mm"] = straight
+    scoring["B"].limit(straight, f"plus longue portion droite d'ellipse {fmt(straight)} ≤ "
+                       f"{STRAIGHT_MAX_MM.text}", high=STRAIGHT_MAX_MM)
 
     overlap = _overlap(base, inner)
-    measures["chevauchement_mm"] = overlap
+    scoring.measures["chevauchement_mm"] = overlap
     tilts = {n: _tilt(e) for n, e in ellipses.items()}
-    checks["C"].add(len(verticals) == 2, f"forme cylindrique : deux ellipses concentriques en "
-                    f"haut, une ellipse de base, {len(verticals)} verticale(s)")
-    checks["C"].limit(overlap, f"chevauchement de la base et de l'ellipse interne {fmt(overlap)} "
-                      "≥ 2 mm", low=MIN_OVERLAP_MM)
+    scoring["C"].add(len(verticals) == 2, f"forme cylindrique : deux ellipses concentriques en "
+                     f"haut, une ellipse de base, {len(verticals)} verticale(s)")
+    scoring["C"].limit(overlap, f"chevauchement de la base et de l'ellipse interne {fmt(overlap)} "
+                       f"≥ {MIN_OVERLAP_MM.text}", low=MIN_OVERLAP_MM)
     for name, tilt in tilts.items():
-        checks["C"].limit(tilt, f"grand axe de l'ellipse {name} à {tilt:.0f}° de l'horizontale "
-                          "(relativement horizontal)", high=HORIZONTAL_LOOSE_DEG, unit="deg")
+        scoring["C"].limit(tilt, f"grand axe de l'ellipse {name} à {tilt:.0f}° de l'horizontale "
+                           "(relativement horizontal)", high=HORIZONTAL_LOOSE_DEG, unit="deg")
 
     for name, tilt in tilts.items():
-        checks["D"].limit(tilt, f"axes de l'ellipse {name} à {tilt:.0f}° de l'horizontale et de "
-                          "la verticale (≤ 5°)", high=AXIS_MAX_DEG, unit="deg")
+        scoring["D"].limit(tilt, f"axes de l'ellipse {name} à {tilt:.0f}° de l'horizontale et de "
+                           f"la verticale (≤ {AXIS_MAX_DEG.text})", high=AXIS_MAX_DEG, unit="deg")
     minor_ratio = max(outer.minor, base.minor) / max(min(outer.minor, base.minor), 1e-6)
-    checks["D"].limit(minor_ratio, f"petits axes de l'ellipse externe {fmt(outer.minor)} et de la "
-                      f"base {fmt(base.minor)} : {fmt_ratio(minor_ratio)} ≤ 1,2:1",
-                      high=GLOBAL_MAX_MINOR_RATIO, unit="ratio")
+    scoring["D"].limit(minor_ratio, f"petits axes de l'ellipse externe {fmt(outer.minor)} et de la "
+                       f"base {fmt(base.minor)} : {fmt_ratio(minor_ratio)} ≤ "
+                       f"{GLOBAL_MAX_MINOR_RATIO.text}",
+                       high=GLOBAL_MAX_MINOR_RATIO, unit="ratio")
 
     circles = [n for n, e in ellipses.items() if e.ratio < CIRCLE_MAX_RATIO]
     not_circles = "ellipses et non cercles" if not circles else f"cercle(s) : {', '.join(circles)}"
-    checks["E"].add(not circles, not_circles)
-    checks["E"].add(True, "deux ellipses concentriques et une ellipse de base distincte")
-    checks["E"].limit(ring, f"l'ellipse de base entre de {fmt(ring)} dans l'anneau du haut "
-                      "(≤ 1 mm)", high=RING_MAX_MM)
+    scoring["E"].add(not circles, not_circles)
+    scoring["E"].add(True, "deux ellipses concentriques et une ellipse de base distincte")
+    scoring["E"].limit(ring, f"l'ellipse de base entre de {fmt(ring)} dans l'anneau du haut "
+                       f"(≤ {RING_MAX_MM.text})", high=RING_MAX_MM)
 
     used = np.vstack([e.points for e in ellipses.values()] + [l.points for l in verticals])
     extra = _away(drawing, used)
     extras = int(extra >= EXTRA_ELEMENT_MM) + len(separate_extras(drawing, used))
-    checks["F"].add(extras == 0, "aucun autre élément" if not extras
-                    else f"{extras} élément(s) en trop")
-    checks["F"].add(not circles, not_circles)
+    scoring["F"].add(extras == 0, "aucun autre élément" if not extras
+                     else f"{extras} élément(s) en trop")
+    scoring["F"].add(not circles, not_circles)
     for axis, a, b in (("grand", outer.major, inner.major), ("petit", outer.minor, inner.minor)):
         ratio = a / max(b, 1e-6)
-        checks["F"].limit(ratio, f"{axis} axe externe {fmt(a)} / interne {fmt(b)} : "
-                          f"{fmt_ratio(ratio)} ≤ 1,4:1", high=LOCAL_MAX_AXIS_RATIO, unit="ratio")
-    return result()
+        scoring["F"].limit(ratio, f"{axis} axe externe {fmt(a)} / interne {fmt(b)} : "
+                           f"{fmt_ratio(ratio)} ≤ {LOCAL_MAX_AXIS_RATIO.text}",
+                           high=LOCAL_MAX_AXIS_RATIO, unit="ratio")
+    return scoring.result()
 
 
 def _bucket(drawing: Drawing) -> tuple[Ellipse, Ellipse, Ellipse] | None:

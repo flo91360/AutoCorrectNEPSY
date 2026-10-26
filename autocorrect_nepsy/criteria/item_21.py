@@ -21,11 +21,26 @@ from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
 from . import polygons
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .ellipses import TOLERANCE_MM, Ellipse, coverage, crosses, find_ellipses, fit, tangents
 from .shapes import separate_extras
 
-CHORDS = 6
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+CHORDS = threshold(6, "GF", "cordes par roue, exactement", "nombre")
+CIRCLE_LOOSE_RATIO = threshold(1.5, "GA", "rapport des diamètres d'une roue, au plus (roue sans "
+                               "distorsion)", "ratio")
+CIRCLE_RATIO = threshold(1.3, "C", "rapport des diamètres d'une roue, au plus (cercle)", "ratio")
+GAP_MM = threshold(1.0, "B", "intervalle dans une jante ou un rayon, au plus")
+SIZE_RATIO = (threshold(1.1, "D", "rapport du grand diamètre de la roue gauche à celui de la "
+                        "roue droite, au moins", "ratio"),
+              threshold(1.4, "D", "rapport du grand diamètre de la roue gauche à celui de la "
+                        "roue droite, au plus", "ratio"))
+LEFT_CHORD_MAX_MM = threshold(58.0, "E", "plus longue corde de la roue gauche, au plus")
+RIGHT_CHORD_MAX_MM = threshold(48.0, "E", "plus longue corde de la roue droite, au plus")
+CHORD_RATIO_MAX = threshold(1.1, "F", "rapport de la plus longue à la plus courte corde de la "
+                            "roue droite, au plus", "ratio")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 MIN_WHEEL_MM = 15.0  # petit diamètre minimal d'une roue
 OTHER_WHEEL_COVERAGE = 0.8  # autre cercle (rapport ≤ 1,5) bien tracé : roue en trop
 RIM_NEAR_FRACTION = 0.25  # contour extérieur à moins de 25 % du rayon : la jante
@@ -53,18 +68,11 @@ RIM_STOP_MM = 1.0  # un rayon est suivi jusqu'à 1 mm de la jante
 AXLE_NEAR_MM = 1.5
 AXLE_MIN_COVER = 0.8  # part de la distance entre les moyeux couverte par l'essieu
 OPPOSITE_DEG = 15.0  # deux rayons opposés forment une corde
-CIRCLE_LOOSE_RATIO = 1.5  # Général, Motricité A
-CIRCLE_RATIO = 1.3  # Global C
 DISTORTION_MAX_SPREAD = 0.08  # irrégularité du rayon d'une roue (bosses, angles)
-GAP_MM = 1.0  # Motricité B
 # La jante tracée à main levée s'écarte de l'ellipse ajustée : elle est
 # cherchée entre 70 % et 140 % de la distance du centre à l'ellipse.
 RIM_BAND = (0.7, 1.4)
 AXIS_LOOSE_DEG = 10.0  # corde horizontale ou verticale « ou presque »
-SIZE_RATIO = (1.1, 1.4)  # Global D : roue gauche / roue droite
-LEFT_CHORD_MAX_MM = 58.0  # Local E
-RIGHT_CHORD_MAX_MM = 48.0
-CHORD_RATIO_MAX = 1.1  # Local F : roue droite
 
 
 @dataclass
@@ -99,43 +107,35 @@ class Wheel:
 
 
 def score(drawing: Drawing, item: int = 21) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {}
-    marks: list = []
-    notes: list[str] = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+        return scoring.empty()
 
     found = _wheel_ellipses(drawing)
     if found is None:
-        not_recognized(checks, codes, "roues non reconnues (deux cercles qui se chevauchent)",
-                       notes)
-        return result()
+        scoring.not_recognized(scoring.codes,
+                               "roues non reconnues (deux cercles qui se chevauchent)")
+        return scoring.result()
     (left_e, right_e), extra_wheels = found
     left, right = _wheels(drawing, left_e, right_e)
     names = {"gauche": left, "droite": right}
     axle = _axle_cover(drawing, left.hub, right.hub)
-    measures["essieu_couvert"] = axle
+    scoring.measures["essieu_couvert"] = axle
 
     for color, (name, wheel) in enumerate(names.items()):
         e = wheel.ellipse
-        marks.append(mk.trace(e.at(np.linspace(0, 2 * np.pi, 120)),
-                              f"roue {name} {fmt(e.major, '')} × {fmt(e.minor)}", color))
+        scoring.marks.append(mk.trace(e.at(np.linspace(0, 2 * np.pi, 120)),
+                                      f"roue {name} {fmt(e.major, '')} × {fmt(e.minor)}", color))
         for pair in wheel.chords:
             a, b = (wheel.spokes[k].end for k in pair)
-            marks.append(mk.segment(a, b, fmt(wheel.chord_length(pair), "")))
+            scoring.marks.append(mk.segment(a, b, fmt(wheel.chord_length(pair), "")))
         for k in wheel.unpaired:
-            marks.append(mk.segment(wheel.hub, wheel.spokes[k].end, "rayon seul"))
-        measures[f"{name}_grand_mm"] = e.major
-        measures[f"{name}_petit_mm"] = e.minor
-        measures[f"{name}_cordes"] = float(len(wheel.chords))
-        measures[f"{name}_rayons"] = float(len(wheel.spokes))
-    marks.append(mk.segment(left.hub, right.hub, f"essieu {axle:.0%}".replace("%", " %")))
+            scoring.marks.append(mk.segment(wheel.hub, wheel.spokes[k].end, "rayon seul"))
+        scoring.measures[f"{name}_grand_mm"] = e.major
+        scoring.measures[f"{name}_petit_mm"] = e.minor
+        scoring.measures[f"{name}_cordes"] = float(len(wheel.chords))
+        scoring.measures[f"{name}_rayons"] = float(len(wheel.spokes))
+    scoring.marks.append(mk.segment(left.hub, right.hub, f"essieu {axle:.0%}".replace("%", " %")))
 
     overlap = crosses(left_e, right_e)
     distorted = [n for n, w in names.items() if w.ellipse.spread > DISTORTION_MAX_SPREAD]
@@ -145,7 +145,7 @@ def score(drawing: Drawing, item: int = 21) -> ItemResult:
     inside = bool(left_e.contains(right_e.center[None])[0]) if small_right else bool(
         right_e.contains(left_e.center[None])[0])
 
-    general = checks["G"]
+    general = scoring["G"]
     general.add(overlap, "les deux roues se chevauchent" if overlap
                 else "les deux roues ne se chevauchent pas")
     general.add(not distorted and not loose, "roues sans distorsion" if not (distorted or loose)
@@ -167,63 +167,66 @@ def score(drawing: Drawing, item: int = 21) -> ItemResult:
     general.add(inside, "centre de la petite roue dans la grande" if inside
                 else "centre de la petite roue hors de la grande")
 
-    checks["A"].add(not distorted and not loose, "roues identifiables, sans distorsion majeure"
-                    if not (distorted or loose)
-                    else f"roue(s) déformée(s) : {', '.join(sorted(set(distorted + loose)))}")
+    scoring["A"].add(not distorted and not loose, "roues identifiables, sans distorsion majeure"
+                     if not (distorted or loose)
+                     else f"roue(s) déformée(s) : {', '.join(sorted(set(distorted + loose)))}")
 
     rim_gaps = {n: _rim_gap(drawing, w.ellipse, o.ellipse)
                 for (n, w), o in zip(names.items(), (right, left))}
     spoke_gap = max((s.gap for w in names.values() for s in w.spokes), default=0.0)
-    measures.update({"jante_intervalle_max_mm": max(rim_gaps.values()),
-                     "rayon_intervalle_max_mm": spoke_gap})
+    scoring.measures.update({"jante_intervalle_max_mm": max(rim_gaps.values()),
+                             "rayon_intervalle_max_mm": spoke_gap})
     for name, gap in rim_gaps.items():
-        checks["B"].limit(gap, f"jante {name} : plus grand intervalle {fmt(gap)} ≤ 1 mm",
-                          high=GAP_MM)
-    checks["B"].limit(spoke_gap, f"plus grand intervalle dans un rayon {fmt(spoke_gap)} ≤ 1 mm",
-                      high=GAP_MM)
+        scoring["B"].limit(gap, f"jante {name} : plus grand intervalle {fmt(gap)} ≤ {GAP_MM.text}",
+                           high=GAP_MM)
+    scoring["B"].limit(spoke_gap, f"plus grand intervalle dans un rayon {fmt(spoke_gap)} ≤ "
+                       f"{GAP_MM.text}",
+                       high=GAP_MM)
 
     for name, wheel in names.items():
         ratio = wheel.ellipse.ratio
-        checks["C"].limit(ratio, f"roue {name} : cercle, diamètres {fmt_ratio(ratio)} ≤ 1,3:1",
-                          high=CIRCLE_RATIO, unit="ratio")
-    checks["C"].add(not extra_wheels and axles, "deux roues seulement, reliées par un essieu"
-                    if not extra_wheels and axles else
-                    f"{2 + extra_wheels} roue(s), essieu tracé sur {axle:.0%}".replace("%", " %"))
+        scoring["C"].limit(ratio, f"roue {name} : cercle, diamètres {fmt_ratio(ratio)} ≤ "
+                           f"{CIRCLE_RATIO.text}",
+                           high=CIRCLE_RATIO, unit="ratio")
+    scoring["C"].add(not extra_wheels and axles, "deux roues seulement, reliées par un essieu"
+                     if not extra_wheels and axles else
+                     f"{2 + extra_wheels} roue(s), essieu tracé sur {axle:.0%}".replace("%", " %"))
 
     size = left_e.major / max(right_e.major, 1e-6)
-    measures["rapport_roues"] = size
-    checks["D"].add(overlap, "les roues se chevauchent" if overlap
-                    else "les roues ne se chevauchent pas")
-    checks["D"].limit(size, f"grand diamètre roue gauche {fmt(left_e.major)} / roue droite "
-                      f"{fmt(right_e.major)} : {fmt_ratio(size)} entre 1,1:1 et 1,4:1",
-                      low=SIZE_RATIO[0], high=SIZE_RATIO[1], unit="ratio")
+    scoring.measures["rapport_roues"] = size
+    scoring["D"].add(overlap, "les roues se chevauchent" if overlap
+                     else "les roues ne se chevauchent pas")
+    scoring["D"].limit(size, f"grand diamètre roue gauche {fmt(left_e.major)} / roue droite "
+                       f"{fmt(right_e.major)} : {fmt_ratio(size)} entre {SIZE_RATIO[0].text} et "
+                       f"{SIZE_RATIO[1].text}", low=SIZE_RATIO[0], high=SIZE_RATIO[1], unit="ratio")
 
     for name, wheel, limit in (("gauche", left, LEFT_CHORD_MAX_MM),
                                ("droite", right, RIGHT_CHORD_MAX_MM)):
         lengths = [wheel.chord_length(p) for p in wheel.chords] or [wheel.ellipse.major]
-        checks["E"].limit(max(lengths), f"roue {name} : plus longue corde {fmt(max(lengths))} "
-                          f"≤ {limit:.0f} mm", high=limit)
+        scoring["E"].limit(max(lengths), f"roue {name} : plus longue corde {fmt(max(lengths))} "
+                           f"≤ {limit.text}", high=limit)
 
     figure = np.vstack([w.ellipse.at(np.linspace(0, 2 * np.pi, 180)) for w in names.values()]
                        + [s.points for w in names.values() for s in w.spokes]
                        + [np.linspace(left.hub, right.hub, 50)])
     extras = len(separate_extras(drawing, figure))
     added = sum(max(len(w.spokes) - 2 * CHORDS, 0) for w in names.values())
-    checks["F"].add(not extras and not added and not extra_wheels, "aucun autre élément"
-                    if not (extras or added or extra_wheels)
-                    else f"{added} rayon(s) ajouté(s), {extras + extra_wheels} autre(s) élément(s)")
+    scoring["F"].add(not extras and not added and not extra_wheels, "aucun autre élément"
+                     if not (extras or added or extra_wheels)
+                     else f"{added} rayon(s) ajouté(s), {extras + extra_wheels} autre(s) élément(s)")
     for name, wheel in names.items():
         counts = _quadrants(wheel)
-        checks["F"].add(counts == [2, 2, 2, 2], f"roue {name} : deux rayons par quadrant" if
-                        counts == [2, 2, 2, 2] else f"roue {name} : rayons par quadrant "
-                        + ("non délimités (corde horizontale ou verticale absente)"
+        scoring["F"].add(counts == [2, 2, 2, 2], f"roue {name} : deux rayons par quadrant" if
+                         counts == [2, 2, 2, 2] else f"roue {name} : rayons par quadrant "
+                         + ("non délimités (corde horizontale ou verticale absente)"
                            if counts is None else ", ".join(map(str, counts))))
     lengths = [right.chord_length(p) for p in right.chords]
     spread = max(lengths) / max(min(lengths), 1e-6) if len(lengths) >= 2 else float("inf")
-    measures["cordes_droite_rapport"] = spread
-    checks["F"].limit(spread, f"roue droite : plus longue / plus courte corde "
-                      f"{fmt_ratio(spread)} ≤ 1,1:1", high=CHORD_RATIO_MAX, unit="ratio")
-    return result()
+    scoring.measures["cordes_droite_rapport"] = spread
+    scoring["F"].limit(spread, f"roue droite : plus longue / plus courte corde "
+                       f"{fmt_ratio(spread)} ≤ {CHORD_RATIO_MAX.text}", high=CHORD_RATIO_MAX,
+                       unit="ratio")
+    return scoring.result()
 
 
 def _wheel_ellipses(drawing: Drawing) -> tuple[tuple[Ellipse, Ellipse], int] | None:

@@ -15,45 +15,44 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .polygons import (EDGE_OFFSET_MM, away_from, overshoot, polygon, raster, silhouette,
                        simplify, wavy_changes)
 from .shapes import EXTRA_ELEMENT_MM
 
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+MOTOR_MAX_CHANGES = threshold(3, "A", "changements de direction sur toute la figure, au plus",
+                              "nombre")
+JOIN_MM = threshold(1.0, "B", "intervalle ou dépassement aux intersections, au plus")
+STEPS = threshold(4, "GEF", "nombre de marches, exactement", "nombre")
+GENERAL_MAX_LEFT_BASE = threshold(1.5, "G", "rapport du côté gauche à la base, au plus", "ratio")
+GENERAL_MAX_STEP_RATIO = threshold(1.5, "G", "rapport du plus long au plus court côté de chaque "
+                                   "marche, au plus", "ratio")
+GLOBAL_BASE_DEG = threshold(10.0, "C", "écart de la base à l'horizontale, au plus", "deg")
+GLOBAL_MAX_RISER_RATIO = threshold(1.2, "D", "rapport de la plus haute à la plus basse marche, "
+                                   "au plus", "ratio")
+RIGHT_ANGLE = (threshold(80.0, "DF", "angle droit des coins et des marches, au moins", "deg"),
+               threshold(100.0, "DF", "angle droit des coins et des marches, au plus", "deg"))
+LOCAL_MIN_BASE_MM = threshold(30.0, "E", "longueur de la base, au moins")
+LOCAL_MAX_STEP_SIDE_MM = threshold(25.0, "E", "plus long côté de marche, au plus")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 POLYGON_EPSILONS_MM = (1.0, 1.4, 1.8, 2.4)  # simplification du contour
 WOBBLE_MM = 0.8  # amplitude d'une ondulation de la main (Motricité A)
-MOTOR_MAX_CHANGES = 3  # Motricité A, sur toute la figure
-JOIN_MM = 1.0  # Motricité B : intervalle ou dépassement aux intersections
-STEPS = 4
-GENERAL_MAX_LEFT_BASE = 1.5  # côté gauche / base
-GENERAL_MAX_STEP_RATIO = 1.5  # plus long / plus court côté d'une marche
-GLOBAL_BASE_DEG = 10.0  # Global C
-GLOBAL_MAX_RISER_RATIO = 1.2  # Global D : marche la plus haute / la plus basse
-RIGHT_ANGLE = (80.0, 100.0)  # Global D et Local F
-LOCAL_MIN_BASE_MM = 30.0  # Local E
-LOCAL_MAX_STEP_SIDE_MM = 25.0  # Local E
 ON_OUTLINE_MM = 2.0  # encre plus éloignée du contour : autre élément
 
 
 def score(drawing: Drawing, item: int = 18) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {}
-    marks: list = []
-    notes: list[str] = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+        return scoring.empty()
 
     outline = silhouette(drawing)
     found = None if outline is None else _stairs(outline)
     if found is None:
         reason = "escalier non reconnu (paliers et contremarches entre le haut à gauche et le bas à droite)"
-        not_recognized(checks, codes, reason, notes)
-        return result()
+        scoring.not_recognized(scoring.codes, reason)
+        return scoring.result()
     poly, tl, br, bl = found
     v = poly.vertices
     n = len(v)
@@ -65,83 +64,89 @@ def score(drawing: Drawing, item: int = 18) -> ItemResult:
     left = float(np.linalg.norm(v[tl] - v[bl]))
     base_angle = geo.angle_to_horizontal(v[bl] - v[br])
     count = len(steps)
-    measures.update({"marches": count, "base_mm": base, "cote_gauche_mm": left,
-                     "base_angle_deg": base_angle})
+    scoring.measures.update({"marches": count, "base_mm": base, "cote_gauche_mm": left,
+                             "base_angle_deg": base_angle})
 
-    marks.append(mk.trace(np.vstack([v, v[:1]]), "contour lu", 0))
-    marks.append(mk.cote(v[bl], v[br], f"base {fmt(base)} · {base_angle:.0f}°", side=(0.0, 1.0)))
-    marks.append(mk.cote(v[tl], v[bl], f"gauche {fmt(left)}", side=(-1.0, 0.0)))
+    scoring.marks.append(mk.trace(np.vstack([v, v[:1]]), "contour lu", 0))
+    scoring.marks.append(mk.cote(v[bl], v[br], f"base {fmt(base)} · {base_angle:.0f}°",
+                                 side=(0.0, 1.0)))
+    scoring.marks.append(mk.cote(v[tl], v[bl], f"gauche {fmt(left)}", side=(-1.0, 0.0)))
     for i, (a, b, c) in enumerate(steps, start=1):
-        marks.append(mk.segment(v[b], v[c], f"marche {i} : {fmt(treads[i - 1], '')} × "
-                                f"{fmt(risers[i - 1])}"))
+        scoring.marks.append(mk.segment(v[b], v[c], f"marche {i} : {fmt(treads[i - 1], '')} × "
+                                        f"{fmt(risers[i - 1])}"))
 
     cores = [poly.core(k) for k in range(n)]
     changes = wavy_changes(geo.count_direction_changes(pts, WOBBLE_MM) for pts in cores
                            if len(pts) >= 3)
-    checks["A"].add(changes <= MOTOR_MAX_CHANGES, f"{changes} changement(s) de direction sur "
-                    "toute la figure (3 au plus)")
+    scoring["A"].add(changes <= MOTOR_MAX_CHANGES, f"{changes} changement(s) de direction sur "
+                     f"toute la figure ({MOTOR_MAX_CHANGES.text} au plus)")
     r = raster(drawing)
     gaps = r.gaps if r is not None else []
     over = [overshoot(drawing, poly, k) for k in range(n)]
     worst = max(over + gaps)
-    measures["jonction_max_mm"] = worst
+    scoring.measures["jonction_max_mm"] = worst
     if over and max(over) > 0.5:
         k = int(np.argmax(over))
-        marks.append(mk.point(v[k], f"dépasse {fmt(over[k])}"))
-    checks["B"].limit(worst, f"plus grand intervalle ou dépassement aux intersections {fmt(worst)} "
-                      "≤ 1 mm", high=JOIN_MM)
+        scoring.marks.append(mk.point(v[k], f"dépasse {fmt(over[k])}"))
+    scoring["B"].limit(worst, f"plus grand intervalle ou dépassement aux intersections {fmt(worst)} "
+                       f"≤ {JOIN_MM.text}", high=JOIN_MM)
 
     rounded = poly.rounded()
     for k, gap in rounded:
-        marks.append(mk.point(v[k], f"coin arrondi {fmt(gap)}"))
+        scoring.marks.append(mk.point(v[k], f"coin arrondi {fmt(gap)}"))
     step_ratios = [max(t, s) / max(min(t, s), 1e-6) for t, s in zip(treads, risers)]
-    general = checks["G"]
-    general.add(count == STEPS, f"{count} marche(s) (exactement 4)")
+    general = scoring["G"]
+    general.add(count == STEPS, f"{count} marche(s) (exactement {STEPS.text})")
     general.add(not rounded, "angles ni pincés ni arrondis" if not rounded
                 else f"{len(rounded)} angle(s) arrondi(s)")
     left_base = left / max(base, 1e-6)
     general.limit(left_base, f"côté gauche {fmt(left)} / base {fmt(base)} : {fmt_ratio(left_base)} "
-                  "≤ 1,5:1", high=GENERAL_MAX_LEFT_BASE, unit="ratio")
+                  f"≤ {GENERAL_MAX_LEFT_BASE.text}", high=GENERAL_MAX_LEFT_BASE, unit="ratio")
     worst_step = max(step_ratios)
     general.limit(worst_step, f"marche la moins régulière : plus long / plus court côté "
-                  f"{fmt_ratio(worst_step)} ≤ 1,5:1", high=GENERAL_MAX_STEP_RATIO, unit="ratio")
+                  f"{fmt_ratio(worst_step)} ≤ {GENERAL_MAX_STEP_RATIO.text}",
+                  high=GENERAL_MAX_STEP_RATIO, unit="ratio")
 
-    checks["C"].add(count >= 2, f"figure en marches d'escalier ({count} marche(s))")
-    checks["C"].limit(base_angle, f"base à {base_angle:.0f}° de l'horizontale (≤ 10°)",
-                      high=GLOBAL_BASE_DEG, unit="deg")
+    scoring["C"].add(count >= 2, f"figure en marches d'escalier ({count} marche(s))")
+    scoring["C"].limit(base_angle, f"base à {base_angle:.0f}° de l'horizontale "
+                       f"(≤ {GLOBAL_BASE_DEG.text})",
+                       high=GLOBAL_BASE_DEG, unit="deg")
 
     riser_ratio = max(risers) / max(min(risers), 1e-6)
-    measures["rapport_hauteurs_marches"] = riser_ratio
-    checks["D"].limit(riser_ratio, f"hauteurs des marches {_list(risers)} : plus haute / plus "
-                      f"basse {fmt_ratio(riser_ratio)} ≤ 1,2:1", high=GLOBAL_MAX_RISER_RATIO,
-                      unit="ratio")
+    scoring.measures["rapport_hauteurs_marches"] = riser_ratio
+    scoring["D"].limit(riser_ratio, f"hauteurs des marches {_list(risers)} : plus haute / plus "
+                       f"basse {fmt_ratio(riser_ratio)} ≤ {GLOBAL_MAX_RISER_RATIO.text}",
+                       high=GLOBAL_MAX_RISER_RATIO,
+                       unit="ratio")
     lo, hi = RIGHT_ANGLE
     for name, k in (("haut-gauche", tl), ("haut de la première marche", chain[1]),
                     ("bas-gauche", bl), ("bas-droit", br)):
         angle = _corner_angle(v, k)
-        checks["D"].limit(angle, f"angle {name} : {angle:.0f}° (entre 80° et 100°)", low=lo,
-                          high=hi, unit="deg")
+        scoring["D"].limit(angle, f"angle {name} : {angle:.0f}° (entre {lo.text} et {hi.text})",
+                           low=lo, high=hi, unit="deg")
 
-    checks["E"].add(count == STEPS, f"{count} marche(s) (exactement 4)")
-    checks["E"].limit(base, f"base {fmt(base)} ≥ 30 mm", low=LOCAL_MIN_BASE_MM)
+    scoring["E"].add(count == STEPS, f"{count} marche(s) (exactement {STEPS.text})")
+    scoring["E"].limit(base, f"base {fmt(base)} ≥ {LOCAL_MIN_BASE_MM.text}", low=LOCAL_MIN_BASE_MM)
     longest = max(treads + risers)
-    checks["E"].limit(longest, f"plus long côté de marche {fmt(longest)} ≤ 25 mm",
-                      high=LOCAL_MAX_STEP_SIDE_MM)
+    scoring["E"].limit(longest, f"plus long côté de marche {fmt(longest)} ≤ "
+                       f"{LOCAL_MAX_STEP_SIDE_MM.text}",
+                       high=LOCAL_MAX_STEP_SIDE_MM)
 
     extra = away_from(drawing, [outline], ON_OUTLINE_MM)
     extras = max(0, count - STEPS) + int(extra >= EXTRA_ELEMENT_MM) + sum(
         size >= EXTRA_ELEMENT_MM for size in drawing.component_sizes[1:])
-    checks["F"].add(extras == 0, "aucun autre élément" if not extras
-                    else f"{extras} élément(s) en trop (marches au-delà de 4 comprises)")
+    scoring["F"].add(extras == 0, "aucun autre élément" if not extras
+                     else f"{extras} élément(s) en trop (marches au-delà de {STEPS.text} "
+                     "comprises)")
     step_corners = [k for k in chain[2:-1] if k not in (tl, br)]
     rounded_steps = [k for k, _ in rounded if k in step_corners]
-    checks["F"].add(not rounded_steps, "aucun angle de marche arrondi" if not rounded_steps
-                    else f"{len(rounded_steps)} angle(s) de marche arrondi(s)")
+    scoring["F"].add(not rounded_steps, "aucun angle de marche arrondi" if not rounded_steps
+                     else f"{len(rounded_steps)} angle(s) de marche arrondi(s)")
     for k in step_corners:
         angle = _corner_angle(v, k)
-        checks["F"].limit(angle, f"angle de marche : {angle:.0f}° (entre 80° et 100°)", low=lo,
-                          high=hi, unit="deg")
-    return result()
+        scoring["F"].limit(angle, f"angle de marche : {angle:.0f}° (entre {lo.text} et "
+                           f"{hi.text})", low=lo, high=hi, unit="deg")
+    return scoring.result()
 
 
 def _stairs(outline: np.ndarray):

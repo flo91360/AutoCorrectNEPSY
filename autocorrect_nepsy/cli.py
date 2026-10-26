@@ -1,4 +1,5 @@
-"""Ligne de commande : ``autocorrect-nepsy corriger``, ``comparer`` et ``valider``."""
+"""Ligne de commande : ``autocorrect-nepsy corriger``, ``comparer``, ``valider`` et
+``seuils``."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ from pathlib import Path
 
 from . import validation
 from .compare import format_comparison, pair_scores, read_flags, read_scores
+from .criteria import CODES, PROCESS_NAMES, SUPPORTED_ITEMS, all_manual_thresholds
 from .ink import INK_HUES
 from .layout import LayoutError
 from .pipeline import correct, page_label
@@ -61,9 +63,16 @@ def main(argv: list[str] | None = None) -> int:
     val.add_argument("--precedent", type=Path,
                      help="résultats JSON d'un passage précédent, pour voir ce qui a changé")
 
+    thr = commands.add_parser("seuils", help="liste les seuils du manuel utilisés par l'outil")
+    thr.add_argument("--item", type=int, choices=SUPPORTED_ITEMS, metavar="N",
+                     help="seulement les seuils de cet item")
+
     args = parser.parse_args(argv)
     if args.command == "valider":
         return _validate(args)
+    if args.command == "seuils":
+        print(format_thresholds(args.item))
+        return 0
     if args.command == "comparer":
         try:
             flags = read_flags(args.automatique)
@@ -88,6 +97,26 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\nRésultats écrits dans {args.sortie}/ (cotation.csv, cotation_automatique.csv, "
           "rapport.html)")
     return 0
+
+
+def format_thresholds(item: int | None = None) -> str:
+    """Seuils du manuel, item par item : critère(s), valeur et description."""
+    legend = ", ".join(f"{code} : {PROCESS_NAMES[code]}" for code in CODES)
+    lines = ["Seuils du manuel NEPSY-II (reformulés) utilisés par l'outil, à vérifier sur le "
+             "manuel.", f"Critères : {legend}.",
+             "Les autres constantes du code sont des réglages internes de l'outil."]
+    current = None
+    entries = [e for e in all_manual_thresholds() if item is None or item in e.items]
+    # Dans un item, dans l'ordre des critères de la feuille de cotation.
+    entries.sort(key=lambda e: (e.items, CODES.index(e.threshold.codes[0])))
+    for entry in entries:
+        if entry.items != current:
+            current = entry.items
+            label = " et ".join(map(str, current))
+            lines += ["", f"Item{'s' if len(current) > 1 else ''} {label}"]
+        t = entry.threshold
+        lines.append(f"  {' '.join(t.codes):<5}  {t.text:>7}  {t.description}")
+    return "\n".join(lines)
 
 
 def _validate(args: argparse.Namespace) -> int:

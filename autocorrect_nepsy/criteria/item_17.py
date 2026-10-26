@@ -16,26 +16,36 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .polygons import (EDGE_OFFSET_MM, Polygon, away_from, corner_polygon, fit_polygon,
                        overshoot, raster, regions, silhouette, turn, wavy_changes)
 from .shapes import EXTRA_ELEMENT_MM
 
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+MOTOR_MAX_CHANGES = threshold(3, "A", "changements de direction sur toute la figure, au plus",
+                              "nombre")
+JOIN_MM = threshold(2.0, "B", "intervalle ou dépassement aux intersections, au plus")
+TOP_MAX_DEG = threshold(20.0, "G", "écart des côtés du haut à l'horizontale, au plus", "deg")
+CONVERGENCE_RANGE = (threshold(40.0, "G", "angle de convergence du triangle, au moins", "deg"),
+                     threshold(80.0, "G", "angle de convergence du triangle, au plus", "deg"))
+GLOBAL_MAX_OUTER_RATIO = threshold(1.2, "C", "rapport des deux lignes extérieures, au plus",
+                                   "ratio")
+GLOBAL_MAX_BASE_TOP_RATIO = threshold(1.2, "D", "rapport de la base du triangle à chaque côté du "
+                                      "haut, au plus", "ratio")
+GLOBAL_MIN_OUTER_DEG = threshold(45.0, "D", "angle des lignes extérieures avec l'horizontale, "
+                                 "plus de", "deg")
+LOCAL_MIN_TRAPEZOID_BASE_MM = threshold(25.0, "E", "grande base de chaque trapèze, au moins")
+LOCAL_TRIANGLE_FORBIDDEN = (threshold(75.0, "E", "angle du triangle interdit, à partir de", "deg"),
+                            threshold(105.0, "E", "angle du triangle interdit, jusqu'à", "deg"))
+LOCAL_MIN_TRIANGLE_SIDE_MM = threshold(15.0, "F", "côté horizontal du triangle, au moins")
+LOCAL_MAX_HEIGHT_RATIO = threshold(1.2, "F", "rapport des hauteurs des deux trapèzes, au plus",
+                                   "ratio")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 SILHOUETTE_EPSILON_MM = 1.2  # simplification de la silhouette
 WOBBLE_MM = 0.8  # amplitude d'une ondulation de la main (Motricité A)
-MOTOR_MAX_CHANGES = 3  # Motricité A, sur toute la figure
-JOIN_MM = 2.0  # Motricité B
-TOP_MAX_DEG = 20.0  # Général : côtés horizontaux du haut
 NEAR_RIGHT_DEG = 10.0  # Général : angle « proche de 90° »
-CONVERGENCE_RANGE = (40.0, 80.0)  # Général : angle au sommet du triangle
 PARALLEL_MAX_DEG = 12.0  # côtés parallèles d'un trapèze
-GLOBAL_MAX_OUTER_RATIO = 1.2  # Global C
-GLOBAL_MAX_BASE_TOP_RATIO = 1.2  # Global D
-GLOBAL_MIN_OUTER_DEG = 45.0  # Global D
-LOCAL_MIN_TRAPEZOID_BASE_MM = 25.0  # Local E
-LOCAL_TRIANGLE_FORBIDDEN = (75.0, 105.0)  # Local E
-LOCAL_MIN_TRIANGLE_SIDE_MM = 15.0  # Local F
-LOCAL_MAX_HEIGHT_RATIO = 1.2  # Local F
 ON_OUTLINE_MM = 2.0  # encre plus éloignée des régions : autre élément
 
 
@@ -66,29 +76,21 @@ class Trapezoid:
 
 
 def score(drawing: Drawing, item: int = 17) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {}
-    marks: list = []
-    notes: list[str] = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+        return scoring.empty()
 
     lines = drawing.significant_lines()
     changes = wavy_changes(line.direction_changes for line in lines)
-    checks["A"].add(changes <= MOTOR_MAX_CHANGES, f"{changes} changement(s) de direction sur "
-                    "toute la figure (3 au plus)")
+    scoring["A"].add(changes <= MOTOR_MAX_CHANGES, f"{changes} changement(s) de direction sur "
+                     f"toute la figure ({MOTOR_MAX_CHANGES.text} au plus)")
 
     closed = regions(drawing)
     found = _v_regions(closed)
     if found is None:
         reason = "figure en V non reconnue (un triangle en bas et un trapèze de chaque côté)"
-        not_recognized(checks, ("G", "B", "C", "D", "E", "F"), reason, notes)
-        return result()
+        scoring.not_recognized(("G", "B", "C", "D", "E", "F"), reason)
+        return scoring.result()
     triangle, left, right = found
     t = triangle.vertices
     apex = t[int(np.argmin(t[:, 1]))]
@@ -101,17 +103,18 @@ def score(drawing: Drawing, item: int = 17) -> ItemResult:
     outers = [z.outer_length for z in (left, right)]
     outer_angles = [geo.angle_to_horizontal(z.outer[1] - z.outer[0]) for z in (left, right)]
     heights = [z.height for z in (left, right)]
-    measures.update({"base_mm": base, "angle_convergence_deg": convergence,
-                     "ligne_exterieure_gauche_mm": outers[0], "ligne_exterieure_droite_mm": outers[1],
-                     "haut_gauche_mm": tops[0], "haut_droit_mm": tops[1]})
+    scoring.measures.update({"base_mm": base, "angle_convergence_deg": convergence,
+                             "ligne_exterieure_gauche_mm": outers[0],
+                             "ligne_exterieure_droite_mm": outers[1],
+                             "haut_gauche_mm": tops[0], "haut_droit_mm": tops[1]})
 
     for color, poly in enumerate((left.poly, triangle, right.poly)):
-        marks.append(mk.trace(np.vstack([poly.vertices, poly.vertices[:1]]),
-                              ("trapèze", "triangle", "trapèze")[color], color))
-    marks.append(mk.angle(apex, bottom[0], bottom[1], f"{convergence:.0f}°"))
-    marks.append(mk.cote(bottom[0], bottom[1], f"base {fmt(base)}", side=(0.0, 1.0)))
+        scoring.marks.append(mk.trace(np.vstack([poly.vertices, poly.vertices[:1]]),
+                                      ("trapèze", "triangle", "trapèze")[color], color))
+    scoring.marks.append(mk.angle(apex, bottom[0], bottom[1], f"{convergence:.0f}°"))
+    scoring.marks.append(mk.cote(bottom[0], bottom[1], f"base {fmt(base)}", side=(0.0, 1.0)))
     for z, length, angle in zip((left, right), outers, outer_angles):
-        marks.append(mk.segment(*z.outer, f"{fmt(length)} · {angle:.0f}°"))
+        scoring.marks.append(mk.segment(*z.outer, f"{fmt(length)} · {angle:.0f}°"))
 
     outline = silhouette(drawing)
     r = raster(drawing)
@@ -125,63 +128,69 @@ def score(drawing: Drawing, item: int = 17) -> ItemResult:
         over = [overshoot(drawing, shape, k) for k in range(len(shape.vertices))
                 if turn(shape.vertices, k) > 0]
     worst = max(over + gaps + [0.0])
-    measures["jonction_max_mm"] = worst
-    checks["B"].limit(worst, f"plus grand intervalle ou dépassement aux intersections {fmt(worst)} "
-                      "≤ 2 mm", high=JOIN_MM)
+    scoring.measures["jonction_max_mm"] = worst
+    scoring["B"].limit(worst, f"plus grand intervalle ou dépassement aux intersections {fmt(worst)} "
+                       f"≤ {JOIN_MM.text}", high=JOIN_MM)
 
     near_right = [a for z in (triangle, left.poly, right.poly)
                   for a in (z.angle(k) for k in range(len(z.vertices)))
                   if abs(a - 90) <= NEAR_RIGHT_DEG]
     lo, hi = CONVERGENCE_RANGE
-    general = checks["G"]
+    general = scoring["G"]
     general.add(True, "V à deux dimensions : un triangle en bas et deux trapèzes")
     for name, angle in zip(("gauche", "droit"), top_angles):
-        general.limit(angle, f"côté du haut {name} à {angle:.0f}° de l'horizontale (≤ 20°)",
+        general.limit(angle, f"côté du haut {name} à {angle:.0f}° de l'horizontale "
+                      f"(≤ {TOP_MAX_DEG.text})",
                       high=TOP_MAX_DEG, unit="deg")
     general.add(not near_right, "aucun angle proche de 90°" if not near_right
                 else f"{len(near_right)} angle(s) proche(s) de 90° ({_degrees(near_right)})")
-    general.limit(convergence, f"angle de convergence {convergence:.0f}° (entre 40° et 80°)",
+    general.limit(convergence, f"angle de convergence {convergence:.0f}° (entre {lo.text} et "
+                  f"{hi.text})",
                   low=lo, high=hi, unit="deg")
 
     outer_ratio = max(outers) / max(min(outers), 1e-6)
-    checks["C"].add(True, "V à deux dimensions")
-    checks["C"].limit(outer_ratio, f"lignes extérieures {fmt(outers[0])} et {fmt(outers[1])} : "
-                      f"rapport {fmt_ratio(outer_ratio)} ≤ 1,2:1", high=GLOBAL_MAX_OUTER_RATIO,
-                      unit="ratio")
+    scoring["C"].add(True, "V à deux dimensions")
+    scoring["C"].limit(outer_ratio, f"lignes extérieures {fmt(outers[0])} et {fmt(outers[1])} : "
+                       f"rapport {fmt_ratio(outer_ratio)} ≤ {GLOBAL_MAX_OUTER_RATIO.text}",
+                       high=GLOBAL_MAX_OUTER_RATIO,
+                       unit="ratio")
 
     for name, top in zip(("gauche", "droit"), tops):
         ratio = max(base, top) / max(min(base, top), 1e-6)
-        checks["D"].limit(ratio, f"base {fmt(base)} / haut {name} {fmt(top)} : "
-                          f"{fmt_ratio(ratio)} ≤ 1,2:1", high=GLOBAL_MAX_BASE_TOP_RATIO,
-                          unit="ratio")
+        scoring["D"].limit(ratio, f"base {fmt(base)} / haut {name} {fmt(top)} : "
+                           f"{fmt_ratio(ratio)} ≤ {GLOBAL_MAX_BASE_TOP_RATIO.text}",
+                           high=GLOBAL_MAX_BASE_TOP_RATIO,
+                           unit="ratio")
     for name, angle in zip(("gauche", "droite"), outer_angles):
-        checks["D"].limit(angle, f"ligne extérieure {name} à {angle:.0f}° de l'horizontale "
-                          "(> 45°)", low=GLOBAL_MIN_OUTER_DEG, unit="deg")
+        scoring["D"].limit(angle, f"ligne extérieure {name} à {angle:.0f}° de l'horizontale "
+                           f"(> {GLOBAL_MIN_OUTER_DEG.text})", low=GLOBAL_MIN_OUTER_DEG, unit="deg")
 
     isosceles = [_isosceles(z) for z in (left, right)]
-    checks["E"].add(all(ok for ok, _ in isosceles), "triangle et deux trapèzes isocèles ("
-                    + " ; ".join(text for _, text in isosceles) + ")")
+    scoring["E"].add(all(ok for ok, _ in isosceles), "triangle et deux trapèzes isocèles ("
+                     + " ; ".join(text for _, text in isosceles) + ")")
     for name, length in zip(("gauche", "droit"), outers):
-        checks["E"].limit(length, f"grande base du trapèze {name} {fmt(length)} ≥ 25 mm",
-                          low=LOCAL_MIN_TRAPEZOID_BASE_MM)
+        scoring["E"].limit(length, f"grande base du trapèze {name} {fmt(length)} ≥ "
+                           f"{LOCAL_MIN_TRAPEZOID_BASE_MM.text}",
+                           low=LOCAL_MIN_TRAPEZOID_BASE_MM)
     lo, hi = LOCAL_TRIANGLE_FORBIDDEN
     forbidden = [a for a in triangle_angles if lo <= a <= hi]
-    checks["E"].add(not forbidden, f"angles du triangle {_degrees(triangle_angles)} : aucun "
-                    "entre 75° et 105°")
+    scoring["E"].add(not forbidden, f"angles du triangle {_degrees(triangle_angles)} : aucun "
+                     f"entre {lo.text} et {hi.text}")
 
     extra = away_from(drawing, closed + ([outline] if outline is not None else []), ON_OUTLINE_MM)
     extras = int(extra >= EXTRA_ELEMENT_MM) + sum(
         size >= EXTRA_ELEMENT_MM for size in drawing.component_sizes[1:])
-    checks["F"].add(extras == 0, "aucun autre élément" if not extras
-                    else f"{extras} élément(s) en trop")
-    checks["F"].limit(base, f"côté horizontal du triangle {fmt(base)} ≥ 15 mm",
-                      low=LOCAL_MIN_TRIANGLE_SIDE_MM)
+    scoring["F"].add(extras == 0, "aucun autre élément" if not extras
+                     else f"{extras} élément(s) en trop")
+    scoring["F"].limit(base, f"côté horizontal du triangle {fmt(base)} ≥ "
+                       f"{LOCAL_MIN_TRIANGLE_SIDE_MM.text}", low=LOCAL_MIN_TRIANGLE_SIDE_MM)
     height_ratio = max(heights) / max(min(heights), 1e-6)
-    measures["rapport_hauteurs_trapezes"] = height_ratio
-    checks["F"].limit(height_ratio, f"hauteurs des trapèzes {fmt(heights[0])} et "
-                      f"{fmt(heights[1])} : rapport {fmt_ratio(height_ratio)} ≤ 1,2:1",
-                      high=LOCAL_MAX_HEIGHT_RATIO, unit="ratio")
-    return result()
+    scoring.measures["rapport_hauteurs_trapezes"] = height_ratio
+    scoring["F"].limit(height_ratio, f"hauteurs des trapèzes {fmt(heights[0])} et "
+                       f"{fmt(heights[1])} : rapport {fmt_ratio(height_ratio)} ≤ "
+                       f"{LOCAL_MAX_HEIGHT_RATIO.text}",
+                       high=LOCAL_MAX_HEIGHT_RATIO, unit="ratio")
+    return scoring.result()
 
 
 def _v_regions(found: list[np.ndarray]):

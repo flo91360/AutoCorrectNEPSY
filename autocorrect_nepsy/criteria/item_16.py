@@ -16,57 +16,56 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, not_recognized
+from .base import ItemResult, Scoring, fmt, manual_thresholds
 from .polygons import (EDGE_OFFSET_MM, Polygon, away_from, fit_polygon, raster, regions,
                        silhouette, wavy_changes)
 from .shapes import EXTRA_ELEMENT_MM
 
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+MOTOR_MAX_CHANGES = threshold(3, "A", "changements de direction sur toute la figure, au plus",
+                              "nombre")
+JOIN_MM = threshold(2.0, "GB", "intervalle ou dépassement aux intersections et sur les lignes de "
+                    "liaison, au plus")
+OUTSIDE_MAX_MM = threshold(2.0, "GC", "dépassement des coins d'un triangle hors du triangle qui "
+                           "le contient, au plus")
+BASE_MAX_DEG = threshold(10.0, "D", "écart des bases du moyen et du petit triangle à "
+                         "l'horizontale, au plus", "deg")
+APEX_BAND_MM = threshold(4.0, "D", "largeur de la barre où s'alignent les trois sommets")
+REGIONS = threshold(10, "E", "figures triangulaires dans le grand triangle, exactement", "nombre")
+EQUILATERAL = threshold(4, "E", "triangles sensiblement équilatéraux, exactement", "nombre")
+RIGHT_TRIANGLES = threshold(6, "F", "triangles rectangles, exactement", "nombre")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 WOBBLE_MM = 0.8  # amplitude d'une ondulation de la main (Motricité A)
-MOTOR_MAX_CHANGES = 3  # Motricité A, sur toute la figure
 SHARED_SIDE_MM = 2.5  # côté commun à deux régions voisines
-JOIN_MM = 2.0  # Général et Motricité B : intervalle ou dépassement
-OUTSIDE_MAX_MM = 2.0  # coins d'un triangle hors du triangle qui le contient
 LINK_NEAR_MM = 1.5  # une ligne de liaison passe à moins de cette distance
 LINK_MIN_COVER = 0.7  # Global D : part tracée d'une ligne de liaison
-BASE_MAX_DEG = 10.0  # Global D : bases du moyen et du petit triangle
-APEX_BAND_MM = 4.0  # Global D : sommets alignés dans une barre de 4 mm
-REGIONS = 10  # Local E : figures triangulaires dans le grand triangle
-EQUILATERAL = 4  # Local E
 EQUILATERAL_RANGE = (45.0, 75.0)  # angles d'un triangle « sensiblement équilatéral »
-RIGHT_TRIANGLES = 6  # Local F
 RIGHT_RANGE = (75.0, 105.0)  # Local F : angle droit
 ON_FIGURE_MM = 2.0  # encre plus éloignée des régions : autre élément
 MIN_BIG_SIDE_FRACTION = 0.4  # grand triangle : côtés de longueurs comparables
 
 
 def score(drawing: Drawing, item: int = 16) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {}
-    marks: list = []
-    notes: list[str] = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+        return scoring.empty()
 
     def fail(reason: str, *failing: str) -> ItemResult:
-        not_recognized(checks, failing, reason, notes)
-        return result()
+        scoring.not_recognized(failing, reason)
+        return scoring.result()
 
     outline = silhouette(drawing)
     big, curved = _big_triangle(outline) if outline is not None else (None, False)
     if curved:
-        notes.append("côtés du grand triangle très courbes : ses coins sont pris sur le "
-                     "triangle qui englobe le dessin, vérifier la cotation")
+        scoring.notes.append("côtés du grand triangle très courbes : ses coins sont pris sur le "
+                             "triangle qui englobe le dessin, vérifier la cotation")
     closed = regions(drawing)
     triangles = [t for t in (fit_polygon(o, 3) for o in closed) if t is not None]
     changes = _direction_changes(triangles)
-    checks["A"].add(changes <= MOTOR_MAX_CHANGES, f"{changes} changement(s) de direction sur "
-                    "toute la figure (3 au plus)")
-    _count_regions(checks, measures, closed, triangles)
+    scoring["A"].add(changes <= MOTOR_MAX_CHANGES, f"{changes} changement(s) de direction sur "
+                     f"toute la figure ({MOTOR_MAX_CHANGES.text} au plus)")
+    _count_regions(scoring, closed, triangles)
     if big is None:
         return fail("grand triangle non reconnu", "G", "B", "C", "D")
     a, bl, br = _apex_first(big)
@@ -76,12 +75,12 @@ def score(drawing: Drawing, item: int = 16) -> ItemResult:
     small, medium = found
     s1, s2, s3 = _apex_first(small)
     m3, m1, m2 = _apex_first(medium, top=False)
-    measures.update({"base_moyen_deg": geo.angle_to_horizontal(m2 - m1),
-                     "base_petit_deg": geo.angle_to_horizontal(s3 - s2)})
+    scoring.measures.update({"base_moyen_deg": geo.angle_to_horizontal(m2 - m1),
+                             "base_petit_deg": geo.angle_to_horizontal(s3 - s2)})
 
-    marks.append(mk.trace(np.vstack([big, big[:1]]), "grand", 0))
-    marks.append(mk.trace(np.vstack([medium, medium[:1]]), "moyen", 1))
-    marks.append(mk.trace(np.vstack([small, small[:1]]), "petit", 2))
+    scoring.marks.append(mk.trace(np.vstack([big, big[:1]]), "grand", 0))
+    scoring.marks.append(mk.trace(np.vstack([medium, medium[:1]]), "moyen", 1))
+    scoring.marks.append(mk.trace(np.vstack([small, small[:1]]), "petit", 2))
 
     # Coins de chaque triangle par rapport au triangle qui le contient
     # (positif : dehors ; négatif : n'atteint pas le côté).
@@ -89,12 +88,12 @@ def score(drawing: Drawing, item: int = 16) -> ItemResult:
     small_out = [_outside(p, medium) for p in (s1, s2, s3)]
     links = [_link(drawing, corner, end) for corner, end in ((a, s1), (bl, s2), (br, s3))]
     for (corner, end), (cover, gap) in zip(((a, s1), (bl, s2), (br, s3)), links):
-        marks.append(mk.segment(corner, end, f"liaison {cover * 100:.0f} %"))
+        scoring.marks.append(mk.segment(corner, end, f"liaison {cover * 100:.0f} %"))
     redrawn = raster(drawing)
     joints = ([abs(v) for v in medium_out + small_out] + [gap for _, gap in links]
               + (redrawn.gaps if redrawn is not None else []))
     worst = max(joints)
-    measures["jonction_max_mm"] = worst
+    scoring.measures["jonction_max_mm"] = worst
 
     orientation = (m3[1] > max(m1[1], m2[1]) and s1[1] < min(s2[1], s3[1])
                    and a[1] < min(bl[1], br[1]))
@@ -102,10 +101,11 @@ def score(drawing: Drawing, item: int = 16) -> ItemResult:
                         else "orientation des triangles différente du modèle")
     inside = max(medium_out) <= OUTSIDE_MAX_MM and max(small_out) <= OUTSIDE_MAX_MM
     inside_text = (f"coins du moyen à {fmt(max(max(medium_out), 0.0))} au plus hors du grand, du "
-                   f"petit à {fmt(max(max(small_out), 0.0))} au plus hors du moyen (≤ 2 mm)")
+                   f"petit à {fmt(max(max(small_out), 0.0))} au plus hors du moyen "
+                   f"(≤ {OUTSIDE_MAX_MM.text})")
     linked = all(cover >= 0.95 for cover, _ in links)
 
-    general = checks["G"]
+    general = scoring["G"]
     general.add(True, "grand, moyen et petit triangles")
     general.add(orientation, orientation_text)
     general.add(inside, inside_text)
@@ -113,39 +113,40 @@ def score(drawing: Drawing, item: int = 16) -> ItemResult:
                 f" ({', '.join(f'{c * 100:.0f} %' for c, _ in links)} tracés)")
     link_gap = max(gap for _, gap in links)
     general.limit(link_gap, f"plus grand intervalle sur les lignes de liaison {fmt(link_gap)} "
-                  "≤ 2 mm", high=JOIN_MM)
+                  f"≤ {JOIN_MM.text}", high=JOIN_MM)
 
-    checks["B"].limit(worst, f"plus grand intervalle ou dépassement aux intersections "
-                      f"{fmt(worst)} ≤ 2 mm", high=JOIN_MM)
+    scoring["B"].limit(worst, f"plus grand intervalle ou dépassement aux intersections "
+                       f"{fmt(worst)} ≤ {JOIN_MM.text}", high=JOIN_MM)
 
-    checks["C"].add(True, "grand, moyen et petit triangles")
-    checks["C"].add(orientation, orientation_text)
-    checks["C"].add(inside, inside_text)
+    scoring["C"].add(True, "grand, moyen et petit triangles")
+    scoring["C"].add(orientation, orientation_text)
+    scoring["C"].add(inside, inside_text)
 
-    checks["D"].add(all(cover >= LINK_MIN_COVER for cover, _ in links),
-                    "une ligne relie chaque coin du grand triangle au coin du petit")
-    for name, angle in (("moyen", measures["base_moyen_deg"]), ("petit", measures["base_petit_deg"])):
-        checks["D"].limit(angle, f"base du triangle {name} à {angle:.0f}° de l'horizontale (≤ 10°)",
-                          high=BASE_MAX_DEG, unit="deg")
+    scoring["D"].add(all(cover >= LINK_MIN_COVER for cover, _ in links),
+                     "une ligne relie chaque coin du grand triangle au coin du petit")
+    for name in ("moyen", "petit"):
+        angle = scoring.measures[f"base_{name}_deg"]
+        scoring["D"].limit(angle, f"base du triangle {name} à {angle:.0f}° de l'horizontale "
+                           f"(≤ {BASE_MAX_DEG.text})", high=BASE_MAX_DEG, unit="deg")
     spread = float(max(a[0], m3[0], s1[0]) - min(a[0], m3[0], s1[0]))
-    measures["alignement_sommets_mm"] = spread
-    checks["D"].limit(spread, f"sommets des trois triangles alignés verticalement : écart "
-                      f"{fmt(spread)} (barre de 4 mm)", high=APEX_BAND_MM)
+    scoring.measures["alignement_sommets_mm"] = spread
+    scoring["D"].limit(spread, f"sommets des trois triangles alignés verticalement : écart "
+                       f"{fmt(spread)} (barre de {APEX_BAND_MM.text})", high=APEX_BAND_MM)
 
     extra = away_from(drawing, closed + [outline], ON_FIGURE_MM)
     extras = int(extra >= EXTRA_ELEMENT_MM) + sum(
         size >= EXTRA_ELEMENT_MM for size in drawing.component_sizes[1:])
-    checks["F"].add(extras == 0, "aucun autre élément" if not extras
-                    else f"{extras} élément(s) en trop")
+    scoring["F"].add(extras == 0, "aucun autre élément" if not extras
+                     else f"{extras} élément(s) en trop")
     small_angles = _angles(small)
     lo, hi = EQUILATERAL_RANGE
-    checks["F"].add(all(lo <= x <= hi for x in small_angles) and linked,
-                    f"petit triangle au centre, sensiblement équilatéral (angles "
-                    f"{', '.join(f'{x:.0f}°' for x in small_angles)}), relié aux coins du grand")
-    return result()
+    scoring["F"].add(all(lo <= x <= hi for x in small_angles) and linked,
+                     f"petit triangle au centre, sensiblement équilatéral (angles "
+                     f"{', '.join(f'{x:.0f}°' for x in small_angles)}), relié aux coins du grand")
+    return scoring.result()
 
 
-def _count_regions(checks: dict, measures: dict, closed: list, triangles: list[Polygon]) -> None:
+def _count_regions(scoring: Scoring, closed: list, triangles: list[Polygon]) -> None:
     """Local E et F : triangles du découpage, équilatéraux et rectangles."""
     lo, hi = EQUILATERAL_RANGE
     r_lo, r_hi = RIGHT_RANGE
@@ -154,14 +155,15 @@ def _count_regions(checks: dict, measures: dict, closed: list, triangles: list[P
         angles = _angles(t.vertices)
         equilateral += all(lo <= x <= hi for x in angles)
         right += any(r_lo <= x <= r_hi for x in angles)
-    measures.update({"regions": len(closed), "triangles": len(triangles),
-                     "equilateraux": equilateral, "rectangles": right})
-    checks["E"].add(len(triangles) == REGIONS and len(closed) == REGIONS,
-                    f"{len(triangles)} figure(s) triangulaire(s) sur {len(closed)} région(s) "
-                    "(exactement 10)")
-    checks["E"].add(equilateral == EQUILATERAL, f"{equilateral} triangle(s) sensiblement "
-                    "équilatéral(aux) (exactement 4)")
-    checks["F"].add(right == RIGHT_TRIANGLES, f"{right} triangle(s) rectangle(s) (exactement 6)")
+    scoring.measures.update({"regions": len(closed), "triangles": len(triangles),
+                             "equilateraux": equilateral, "rectangles": right})
+    scoring["E"].add(len(triangles) == REGIONS and len(closed) == REGIONS,
+                     f"{len(triangles)} figure(s) triangulaire(s) sur {len(closed)} région(s) "
+                     f"(exactement {REGIONS.text})")
+    scoring["E"].add(equilateral == EQUILATERAL, f"{equilateral} triangle(s) sensiblement "
+                     f"équilatéral(aux) (exactement {EQUILATERAL.text})")
+    scoring["F"].add(right == RIGHT_TRIANGLES, f"{right} triangle(s) rectangle(s) "
+                     f"(exactement {RIGHT_TRIANGLES.text})")
 
 
 def _direction_changes(triangles: list[Polygon]) -> int:

@@ -16,20 +16,27 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import STEP_MM, Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import ItemResult, Scoring, fmt, fmt_limit, fmt_ratio, manual_thresholds
 from .polygons import EDGE_OFFSET_MM, Polygon, polygon, silhouette, simplify, turn
 from .shapes import EXTRA_ELEMENT_MM
 
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+MOTOR_MAX_CHANGES = threshold(3, "A", "changements de direction par côté, au plus", "nombre")
+GENERAL_MAX_RATIO = threshold(1.5, "G", "rapport des largeurs, et des longueurs, des branches, "
+                              "au plus", "ratio")
+GLOBAL_MIN_HEIGHT_MM = threshold(20.0, "C", "hauteur de la croix, au moins")
+GLOBAL_MAX_RATIO = threshold(1.2, "D", "rapport des distances du centre aux bouts opposés, "
+                             "au plus", "ratio")
+LOCAL_MAX_OFFSET_MM = threshold(3.0, "E", "décalage d'une branche par rapport à l'axe central, "
+                                "au plus")
+LOCAL_MAX_BRANCH_RATIO = threshold(1.2, "E", "rapport des côtés d'une même branche, au plus",
+                                   "ratio")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 POLYGON_EPSILONS_MM = (1.0, 1.4, 1.8, 2.4, 3.0)  # simplification du contour
 WOBBLE_MM = 0.8  # amplitude d'une ondulation de la main (Motricité A)
-MOTOR_MAX_CHANGES = 3  # Motricité A, par ligne
-GENERAL_MAX_RATIO = 1.5  # largeurs et longueurs des branches
 PARALLEL_MAX_DEG = 15.0  # branches opposées dans le prolongement l'une de l'autre…
 OFFSET_MAX_FRACTION = 0.5  # … sans décalage de plus de la moitié de leur largeur
-GLOBAL_MIN_HEIGHT_MM = 20.0  # Global C
-GLOBAL_MAX_RATIO = 1.2  # Global D : distances du centre aux bouts opposés
-LOCAL_MAX_OFFSET_MM = 3.0  # Local E : branche entièrement décalée de l'axe
-LOCAL_MAX_BRANCH_RATIO = 1.2  # Local E : côtés d'une même branche
 SQUARE_MAX_RATIO = 1.5  # Local F : « manifestement un rectangle » au-delà
 ON_OUTLINE_MM = 1.5  # encre plus éloignée du contour : autre élément
 
@@ -69,32 +76,24 @@ class Branch:
 
 
 def score(drawing: Drawing, item: int = 15) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {}
-    marks: list = []
-    notes: list[str] = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+        return scoring.empty()
 
     outline = silhouette(drawing)
     found = None if outline is None else _cross_polygon(outline)
     if found is None:
         reason = "croix à deux dimensions non reconnue (contour à 12 côtés attendu)"
-        not_recognized(checks, codes, reason, notes)
-        return result()
+        scoring.not_recognized(scoring.codes, reason)
+        return scoring.result()
     poly, concave = found
     vertices = poly.vertices
     branches = _branches(vertices, concave)
     by_name = {b.name: b for b in branches}
     if len(by_name) < 4:
         reason = "branches de la croix non reconnues (haut, droite, bas, gauche)"
-        not_recognized(checks, codes, reason, notes)
-        return result()
+        scoring.not_recognized(scoring.codes, reason)
+        return scoring.result()
     top, right, bottom, left = (by_name[n] for n in ("haut", "droite", "bas", "gauche"))
     center = geo.line_intersection(top.end_middle, bottom.end_middle - top.end_middle,
                                    right.end_middle, left.end_middle - right.end_middle)
@@ -112,29 +111,31 @@ def score(drawing: Drawing, item: int = 15) -> ItemResult:
     inner = vertices[concave]
     square_sides = [float(np.linalg.norm(inner[i] - inner[(i + 1) % 4])) for i in range(4)]
     square_ratio = max(square_sides) / max(min(square_sides), 1e-6)
-    measures.update({"hauteur_mm": height, "largeur_mm": span, "rapport_largeurs": width_ratio,
-                     "rapport_longueurs": length_ratio, "rapport_vertical": vertical_ratio,
-                     "rapport_horizontal": horizontal_ratio, "rapport_carre_central": square_ratio})
+    scoring.measures.update({"hauteur_mm": height, "largeur_mm": span,
+                             "rapport_largeurs": width_ratio, "rapport_longueurs": length_ratio,
+                             "rapport_vertical": vertical_ratio,
+                             "rapport_horizontal": horizontal_ratio,
+                             "rapport_carre_central": square_ratio})
 
-    marks.append(mk.trace(np.vstack([vertices, vertices[:1]]), "contour lu", 0))
-    marks.append(mk.segment(top.end_middle, bottom.end_middle, f"hauteur {fmt(height)}"))
-    marks.append(mk.segment(left.end_middle, right.end_middle, f"largeur {fmt(span)}"))
-    marks.append(mk.point(center, "centre"))
+    scoring.marks.append(mk.trace(np.vstack([vertices, vertices[:1]]), "contour lu", 0))
+    scoring.marks.append(mk.segment(top.end_middle, bottom.end_middle, f"hauteur {fmt(height)}"))
+    scoring.marks.append(mk.segment(left.end_middle, right.end_middle, f"largeur {fmt(span)}"))
+    scoring.marks.append(mk.point(center, "centre"))
 
     rounded = poly.rounded()
     for i, gap in rounded:
-        marks.append(mk.point(vertices[i], f"coin arrondi {fmt(gap)}"))
+        scoring.marks.append(mk.point(vertices[i], f"coin arrondi {fmt(gap)}"))
 
     for k in range(len(vertices)):
         pts = poly.core(k)
         changes = geo.count_direction_changes(pts, WOBBLE_MM) if len(pts) >= 3 else 0
         length = float(np.linalg.norm(vertices[(k + 1) % 12] - vertices[k]))
-        checks["A"].add(changes <= MOTOR_MAX_CHANGES, f"côté de {fmt(length)} : {changes} "
-                        "changement(s) de direction (3 au plus)")
-    checks["B"].add(not rounded, "aucun coin arrondi ou pincé" if not rounded
-                    else f"{len(rounded)} coin(s) arrondi(s)")
+        scoring["A"].add(changes <= MOTOR_MAX_CHANGES, f"côté de {fmt(length)} : {changes} "
+                         f"changement(s) de direction ({MOTOR_MAX_CHANGES.text} au plus)")
+    scoring["B"].add(not rounded, "aucun coin arrondi ou pincé" if not rounded
+                     else f"{len(rounded)} coin(s) arrondi(s)")
 
-    general = checks["G"]
+    general = scoring["G"]
     general.add(True, "croix à deux dimensions")
     for first, second in ((top, bottom), (left, right)):
         angle = geo.angle_between(first.direction, -second.direction)
@@ -144,19 +145,24 @@ def score(drawing: Drawing, item: int = 15) -> ItemResult:
                     f"branches {first.name} et {second.name} dans le prolongement l'une de "
                     f"l'autre (écart d'angle {angle:.0f}°, décalage {fmt(offset)})")
     general.limit(width_ratio, f"largeurs des branches {_list(widths)} : rapport "
-                  f"{fmt_ratio(width_ratio)} ≤ 1,5:1", high=GENERAL_MAX_RATIO, unit="ratio")
+                  f"{fmt_ratio(width_ratio)} ≤ {GENERAL_MAX_RATIO.text}", high=GENERAL_MAX_RATIO,
+                  unit="ratio")
     general.limit(length_ratio, f"longueurs des branches {_list(lengths)} : rapport "
-                  f"{fmt_ratio(length_ratio)} ≤ 1,5:1", high=GENERAL_MAX_RATIO, unit="ratio")
+                  f"{fmt_ratio(length_ratio)} ≤ {GENERAL_MAX_RATIO.text}", high=GENERAL_MAX_RATIO,
+                  unit="ratio")
 
-    checks["C"].add(True, "croix à deux dimensions")
-    checks["C"].limit(height, f"hauteur de la croix {fmt(height)} ≥ 20 mm", low=GLOBAL_MIN_HEIGHT_MM)
+    scoring["C"].add(True, "croix à deux dimensions")
+    scoring["C"].limit(height, f"hauteur de la croix {fmt(height)} ≥ {GLOBAL_MIN_HEIGHT_MM.text}",
+                       low=GLOBAL_MIN_HEIGHT_MM)
 
-    checks["D"].limit(vertical_ratio, f"centre → bouts haut et bas : {fmt(reach['haut'])} et "
-                      f"{fmt(reach['bas'])}, rapport {fmt_ratio(vertical_ratio)} ≤ 1,2:1",
-                      high=GLOBAL_MAX_RATIO, unit="ratio")
-    checks["D"].limit(horizontal_ratio, f"centre → bouts droite et gauche : "
-                      f"{fmt(reach['droite'])} et {fmt(reach['gauche'])}, rapport "
-                      f"{fmt_ratio(horizontal_ratio)} ≤ 1,2:1", high=GLOBAL_MAX_RATIO, unit="ratio")
+    scoring["D"].limit(vertical_ratio, f"centre → bouts haut et bas : {fmt(reach['haut'])} et "
+                       f"{fmt(reach['bas'])}, rapport {fmt_ratio(vertical_ratio)} ≤ "
+                       f"{GLOBAL_MAX_RATIO.text}",
+                       high=GLOBAL_MAX_RATIO, unit="ratio")
+    scoring["D"].limit(horizontal_ratio, f"centre → bouts droite et gauche : "
+                       f"{fmt(reach['droite'])} et {fmt(reach['gauche'])}, rapport "
+                       f"{fmt_ratio(horizontal_ratio)} ≤ {GLOBAL_MAX_RATIO.text}",
+                       high=GLOBAL_MAX_RATIO, unit="ratio")
 
     vertical_axis = geo.unit(bottom.end_middle - top.end_middle)
     horizontal_axis = np.array([vertical_axis[1], -vertical_axis[0]])
@@ -165,25 +171,27 @@ def score(drawing: Drawing, item: int = 15) -> ItemResult:
         # décalage se mesure à l'horizontale, et inversement.
         across = horizontal_axis if branch.name in ("haut", "bas") else vertical_axis
         shift = _shift(branch, center, across)
-        checks["E"].limit(shift, f"branche {branch.name} : décalée de {fmt(shift)} de l'axe "
-                          "central (≤ 3 mm)", high=LOCAL_MAX_OFFSET_MM)
+        scoring["E"].limit(shift, f"branche {branch.name} : décalée de {fmt(shift)} de l'axe "
+                           f"central (≤ {LOCAL_MAX_OFFSET_MM.text})", high=LOCAL_MAX_OFFSET_MM)
         ratio = max(branch.sides) / max(min(branch.sides), 1e-6)
-        checks["E"].limit(ratio, f"branche {branch.name} : côtés {_list(branch.sides)}, rapport "
-                          f"{fmt_ratio(ratio)} ≤ 1,2:1", high=LOCAL_MAX_BRANCH_RATIO, unit="ratio")
+        scoring["E"].limit(ratio, f"branche {branch.name} : côtés {_list(branch.sides)}, rapport "
+                           f"{fmt_ratio(ratio)} ≤ {LOCAL_MAX_BRANCH_RATIO.text}",
+                           high=LOCAL_MAX_BRANCH_RATIO, unit="ratio")
 
     extras = _extras(drawing, outline)
-    checks["F"].add(not extras, "aucun autre élément" if not extras
-                    else f"{len(extras)} élément(s) en trop")
+    scoring["F"].add(not extras, "aucun autre élément" if not extras
+                     else f"{len(extras)} élément(s) en trop")
+    square_text = f"manifestement rectangle au-delà de {fmt_limit(SQUARE_MAX_RATIO, 'ratio')}"
     for branch in branches:
         drawn = branch.sides[:3]
         ratio = max(drawn) / max(min(drawn), 1e-6)
-        checks["F"].limit(ratio, f"branche {branch.name} : trois côtés d'un carré (rapport "
-                          f"{fmt_ratio(ratio)}, manifestement rectangle au-delà de 1,5:1)",
-                          high=SQUARE_MAX_RATIO, unit="ratio")
-    checks["F"].limit(square_ratio, f"centre carré (rapport des côtés {fmt_ratio(square_ratio)}, "
-                      "manifestement rectangle au-delà de 1,5:1)", high=SQUARE_MAX_RATIO,
-                      unit="ratio")
-    return result()
+        scoring["F"].limit(ratio, f"branche {branch.name} : trois côtés d'un carré (rapport "
+                           f"{fmt_ratio(ratio)}, {square_text})",
+                           high=SQUARE_MAX_RATIO, unit="ratio")
+    scoring["F"].limit(square_ratio, f"centre carré (rapport des côtés {fmt_ratio(square_ratio)}, "
+                       f"{square_text})", high=SQUARE_MAX_RATIO,
+                       unit="ratio")
+    return scoring.result()
 
 
 def _cross_polygon(outline: np.ndarray) -> tuple[Polygon, np.ndarray] | None:
