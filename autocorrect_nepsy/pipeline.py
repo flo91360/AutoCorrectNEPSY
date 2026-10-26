@@ -24,6 +24,9 @@ SEPARATOR_TOLERANCE = 0.08
 
 @dataclass
 class ItemReport:
+    """Un item corrigé : proposition de l'outil (``result``) et, une fois l'item
+    vérifié par l'ergothérapeute, les notes qu'il ou elle a changées."""
+
     item: int
     page: int
     source: str
@@ -31,6 +34,34 @@ class ItemReport:
     drawing: Drawing
     zone_image: np.ndarray
     px_per_mm: float
+    corrections: dict[str, int] = field(default_factory=dict)  # code -> note de l'ergo
+    checked: bool = False  # vérifié par l'ergothérapeute
+
+    def score(self, code: str) -> int | None:
+        """Note retenue : celle de l'ergothérapeute si elle l'a changée."""
+        automatic = self.result.score(code)
+        return None if automatic is None else self.corrections.get(code, automatic)
+
+    def total(self, *codes: str) -> int | None:
+        scores = [self.score(code) for code in codes]
+        return None if any(s is None for s in scores) else sum(scores)
+
+    @property
+    def to_review(self) -> bool:
+        """Encore à vérifier : signalé par l'outil et pas encore vérifié."""
+        return self.result.to_review and not self.checked
+
+    def review(self, scores: dict[str, int]) -> None:
+        """Enregistre la vérification de l'ergothérapeute : ``scores`` donne la note
+        retenue de chaque critère, seules celles qui diffèrent de l'outil sont gardées."""
+        unknown = set(scores) - set(self.result.criteria)
+        if unknown:
+            raise ValueError(f"item {self.item} : critère(s) {', '.join(sorted(unknown))} absent(s)")
+        if any(score not in (0, 1) for score in scores.values()):
+            raise ValueError(f"item {self.item} : une note vaut 0 ou 1")
+        self.corrections = {code: score for code, score in scores.items()
+                            if score != self.result.score(code)}
+        self.checked = True
 
 
 @dataclass
@@ -38,6 +69,8 @@ class Correction:
     items: list[ItemReport] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     pages: list[tuple[str, int]] = field(default_factory=list)  # (scan, page du cahier)
+    child: str = ""  # pseudonyme ou initiales de l'enfant, saisi par l'ergothérapeute
+    session_date: str = ""  # date de passation, telle que saisie
 
 
 @dataclass

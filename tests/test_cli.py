@@ -46,6 +46,18 @@ def test_correct_command_writes_scores_and_report(scanned_pdf, tmp_path, capsys)
     assert "Accord global : 28/28" in capsys.readouterr().out
 
 
+def test_child_and_session_date_are_in_the_report(scanned_pdf, tmp_path, capsys):
+    out = tmp_path / "sortie"
+    assert main(["corriger", str(scanned_pdf), "--pages", "2", "-o", str(out),
+                 "--enfant", "L. M.", "--passation", "20/10/2026"]) == 0
+    assert "Enfant : L. M. – passation du 20/10/2026" in capsys.readouterr().out
+    assert "Enfant : L. M." in (out / "rapport.html").read_text(encoding="utf-8")
+    # Sans vérification, les notes retenues sont celles de l'outil.
+    final, automatic = (list(csv.DictReader(open(out / name, encoding="utf-8")))
+                        for name in ("cotation.csv", "cotation_automatique.csv"))
+    assert [row["motricite_A"] for row in final] == [row["motricite_A"] for row in automatic]
+
+
 def test_lone_scan_page_is_read_on_its_printed_models(scanned_pdf, tmp_path, capsys):
     # Les pages 2 à 4 ont la même structure : les modèles imprimés départagent.
     assert main(["corriger", str(scanned_pdf), "-o", str(tmp_path)]) == 0

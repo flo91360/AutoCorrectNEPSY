@@ -196,6 +196,85 @@ def test_results_never_overwrite_a_previous_correction(tmp_path):
     assert second != first and second.parent == tmp_path and not second.exists()
 
 
+def test_results_folder_carries_a_valid_child_label(tmp_path):
+    from autocorrect_nepsy.gui import folder_label, results_folder
+
+    assert folder_label(' Léo/B: "2"? ') == "Léo B 2"  # caractères interdits sous Windows
+    assert results_folder(tmp_path / "scan.pdf", "Léo/B").name.startswith("Correction NEPSY Léo B 20")
+    assert results_folder(tmp_path / "scan.pdf", "  ").name.startswith("Correction NEPSY 20")
+
+
+def corrected(app, scan, child=""):
+    app.child_var.set(child)
+    app.date_var.set("20/10/2026")
+    app.add_paths([scan])
+    wait(app, lambda: app.rows and not app.busy)
+    app.run_correction()
+    wait(app, lambda: app.correction is not None and not app.busy)
+
+
+def csv_rows(path):
+    import csv
+
+    return {row["item"]: row for row in csv.DictReader(open(path, encoding="utf-8"))}
+
+
+def test_ergo_checks_and_corrects_an_item(app, scan, tmp_path, monkeypatch):
+    from autocorrect_nepsy import gui
+
+    corrected(app, scan, child="L. M.")
+    assert "L. M." in app.output.name and app.correction.child == "L. M."
+    assert "passation du 20/10/2026" in (app.output / "rapport.html").read_text(encoding="utf-8")
+
+    app.tree.selection_set("5")
+    app.review_item()
+    assert app.review_window is not None and set(app.review_vars) == set("GABCDEF")
+    app.review_vars["A"].set(0)
+    app._confirm_review()
+    wait(app, lambda: not app.busy)
+    assert app.review_window is None
+    values = app.tree.item("5")["values"]
+    assert values[2] == "0 ✎" and values[4] == "1 ✎" and values[-1] == "✓ vérifié"
+    assert app.tree.item("total")["values"][4] == 7
+    assert "1 vérifié(s)" in str(app.summary.cget("text"))
+    final, automatic = csv_rows(app.output / "cotation.csv"), csv_rows(
+        app.output / "cotation_automatique.csv")
+    assert final["5"]["motricite_A"] == "0" and final["5"]["corrige"] == "A"
+    assert automatic["5"]["motricite_A"] == "1"
+
+    # La comparaison évalue l'outil : sa proposition, pas les notes corrigées.
+    monkeypatch.setattr(gui.filedialog, "askopenfilename",
+                        lambda **_k: str(app.output / "cotation.csv"))
+    app.compare()
+    [window] = [w for w in app.root.winfo_children() if isinstance(w, tk.Toplevel)]
+    [box] = [w for w in window.winfo_children() if isinstance(w, tk.Text)]
+    assert "Accord global : 27/28" in box.get("1.0", "end")
+
+
+def test_review_cancel_changes_nothing_and_needs_a_selected_item(app, scan, monkeypatch):
+    from autocorrect_nepsy import gui
+
+    infos = []
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda title, text: infos.append(text))
+    corrected(app, scan)
+    app.tree.selection_set("total")
+    app.review_item()
+    assert app.review_window is None and "Sélectionnez" in infos[-1]
+
+    app.tree.selection_set("4")
+    app.review_item()
+    app.review_vars["G"].set(0)
+    app._close_review()
+    report = app.correction.items[0]
+    assert not report.checked and report.score("G") == 1
+
+    # Une nouvelle correction ferme la vérification en cours.
+    app.review_item()
+    app.run_correction()
+    assert app.review_window is None
+    wait(app, lambda: not app.busy)
+
+
 def test_icon_is_drawn():
     from autocorrect_nepsy.gui import app_icon
 

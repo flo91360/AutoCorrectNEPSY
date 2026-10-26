@@ -33,11 +33,19 @@ cotation que l'ergothérapeute valide.
      structure de la page et de ses modèles imprimés ; « à confirmer » quand
      elle reste incertaine : choisissez-la alors dans la liste) et sa
      **résolution** en dpi (lue dans le fichier, modifiable) ;
+   - si vous le souhaitez, saisissez le **pseudonyme ou les initiales** de
+     l'enfant et la **date de passation** : ils sont repris dans le rapport,
+     et le pseudonyme dans le nom du dossier des résultats ;
    - cliquez sur **Lancer la correction automatique**.
-4. Les notes s'affichent, les items à vérifier sont surlignés. Le rapport
-   détaillé et le tableau des notes sont enregistrés dans un dossier
+4. Les notes s'affichent, les items à vérifier sont surlignés en orange. Le
+   rapport détaillé et le tableau des notes sont enregistrés dans un dossier
    « Correction NEPSY » à côté des scans. Double-cliquez sur un item pour voir
    son dessin annoté.
+5. Sélectionnez un item et cliquez sur **Vérifier / corriger l'item
+   sélectionné…** : la fenêtre montre le dessin de l'enfant et la note de
+   l'outil pour chaque critère. Confirmez ou changez chaque note, puis
+   **Valider ces notes**. L'item passe en vert (« vérifié »), une note changée
+   est marquée « ✎ », les totaux suivent et les résultats sont réenregistrés.
 
 Tout est calculé sur l'ordinateur : aucun scan n'est envoyé sur Internet.
 
@@ -89,16 +97,29 @@ Pages du cahier :
 |---|---|---|---|---|---|---|
 | Items | 1-3 | 4-7 | 8-11 | 12-15 | 16-18 | 19-21 |
 
+- `--enfant "L. M."` et `--passation 20/10/2026` : pseudonyme (ou initiales)
+  de l'enfant et date de passation, repris dans le rapport.
+
 Sorties dans le dossier choisi :
 
-- `cotation.csv` : note de chaque critère, par item ;
-- `rapport.html` : dessin annoté de chaque item et détail de chaque critère.
+- `cotation.csv` : notes retenues de chaque critère, par item, avec les
+  colonnes `a_verifier`, `verifie` et `corrige` (critères dont l'ergothérapeute
+  a changé la note dans la fenêtre) ;
+- `cotation_automatique.csv` : proposition de l'outil telle quelle, avant les
+  corrections de l'ergothérapeute (identique à `cotation.csv` en ligne de
+  commande) ;
+- `rapport.html` : dessin annoté de chaque item et détail de chaque critère ;
+  les notes changées par l'ergothérapeute y sont surlignées.
 
 ### Comparer à la cotation de l'ergothérapeute
 
 ```bash
-autocorrect-nepsy comparer correction/cotation.csv cotation_ergo.csv
+autocorrect-nepsy comparer correction/cotation_automatique.csv cotation_ergo.csv
 ```
+
+Pour évaluer l'outil, comparez sa proposition (`cotation_automatique.csv`),
+pas les notes déjà corrigées dans la fenêtre. Le bouton **Comparer à la
+cotation de l'ergo…** de la fenêtre le fait de lui-même.
 
 Affiche l'accord global, le kappa de Cohen (global et par critère) et la liste
 des désaccords, en indiquant ceux qui tombent dans un item signalé « à

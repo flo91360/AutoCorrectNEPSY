@@ -6,6 +6,12 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.12.0] - 2026-10-26
+
+- Vérification par l'ergothérapeute dans la fenêtre (« Vérifier / corriger l'item sélectionné… ») : chaque note d'un item est confirmée ou changée, l'item passe « vérifié », les totaux, cotation.csv (colonnes verifie et corrige) et le rapport suivent
+- cotation_automatique.csv garde la proposition de l'outil, avant corrections : c'est elle que compare le bouton « Comparer à la cotation de l'ergo… »
+- Pseudonyme de l'enfant et date de passation (fenêtre, --enfant, --passation) repris dans le rapport, et le pseudonyme dans le nom du dossier des résultats
+
 ## [0.11.0] - 2026-10-25
 
 - Numéro de page lu sur les modèles imprimés quand la structure ne suffit pas (page manquante, scan seul, scans dans le désordre) : --pages n'est plus demandé que si les modèles sont illisibles
