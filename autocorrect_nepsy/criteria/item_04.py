@@ -9,7 +9,7 @@ import numpy as np
 
 from .. import geometry as geo
 from ..strokes import Drawing
-from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
+from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds, near_threshold
 from . import marks as mk
 from .shapes import check_lines, end_at, extra_elements, intersection, review_notes
 
@@ -73,7 +73,7 @@ def score(drawing: Drawing, item: int = 4) -> ItemResult:
     overshoots = [end_at(line, points[name]).overshoot
                   for name, pair in corners.items() for line in pair]
     big_overshoots = sum(o > OVERSHOOT_MM for o in overshoots)
-    near_overshoots = any(abs(o - OVERSHOOT_MM) <= 0.5 for o in overshoots)
+    near_overshoots = any(near_threshold(o, OVERSHOOT_MM) for o in overshoots)
     ratio = max(sides.values()) / max(min(sides.values()), 1e-6)
     longest = max(sides.values())
     for (a, b), side in zip(((tl, tr), (br, bl), (bl, tl), (tr, br)), sides):

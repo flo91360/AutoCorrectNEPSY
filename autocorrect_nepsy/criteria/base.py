@@ -11,11 +11,26 @@ PROCESS_NAMES = {"G": "Général", "A": "Motricité A", "B": "Motricité B",
                  "C": "Global C", "D": "Global D", "E": "Local E", "F": "Local F"}
 
 
-# Une mesure est « limite » si elle est à moins de 5 % du seuil, avec une
-# marge minimale qui tient compte de la précision du scan et du tracé.
-BORDERLINE_FRACTION = 0.05
-BORDERLINE_MIN = {"mm": 0.5, "deg": 2.0, "ratio": 0.03, "part": 0.02}
-THRESHOLD_UNITS = (*BORDERLINE_MIN, "nombre")
+# Une mesure est « limite » quand son écart au seuil tient dans l'incertitude de
+# la comparaison entre l'outil et l'ergothérapeute :
+# - bruit de mesure de l'outil (même dessin décalé d'une fraction de pixel,
+#   tourné de 0,3° ou flouté : 0,25 mm, 0,7° et 0,013 de rapport dans 95 % des
+#   cas sur les copies synthétiques) ;
+# - lecture à la règle et au rapporteur, environ 0,5 mm et 2°, soit 3 % sur un
+#   rapport de deux longueurs ;
+# - pour les longueurs seulement, échelle du scan (2 %) : un angle ou un rapport
+#   n'en dépend pas.
+# Marge par unité : (part du seuil, minimum). Réduite au seul bruit de l'outil,
+# elle laissait passer sans signalement 4 des 5 copies fidèles qui perdent un
+# point avec un tremblement de 0,8 mm.
+BORDERLINE = {"mm": (0.02, 0.5), "deg": (0.0, 2.0), "ratio": (0.03, 0.03), "part": (0.0, 0.02)}
+THRESHOLD_UNITS = (*BORDERLINE, "nombre")
+
+
+def near_threshold(value: float, threshold: float, unit: str = "mm") -> bool:
+    """La mesure est assez proche du seuil pour que la note puisse basculer."""
+    fraction, minimum = BORDERLINE[unit]
+    return abs(value - threshold) <= max(fraction * abs(threshold), minimum)
 
 
 class Threshold:
@@ -91,8 +106,7 @@ class Checks:
               high: float | None = None, unit: str = "mm") -> "Checks":
         """Condition chiffrée ``low <= value <= high`` (bornes facultatives)."""
         ok = (low is None or value >= low) and (high is None or value <= high)
-        near = any(abs(value - t) <= max(BORDERLINE_FRACTION * abs(t), BORDERLINE_MIN[unit])
-                   for t in (low, high) if t is not None)
+        near = any(near_threshold(value, t, unit) for t in (low, high) if t is not None)
         return self.add(ok, text, near)
 
     def criterion(self, code: str) -> Criterion:

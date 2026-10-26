@@ -15,6 +15,12 @@ cotation que l'ergothérapeute valide.
   trait repassé à côté du premier tracé, zone vide, figure du modèle non
   retrouvée dans le dessin (l'outil a pu mal le lire), page du cahier devinée
   sans certitude, échelle du scan douteuse.
+- Une mesure est « proche du seuil » quand l'écart tient dans l'incertitude de
+  la comparaison avec l'ergothérapeute : 0,5 mm (ou 2 % du seuil pour une
+  longueur, à cause de l'échelle du scan), 2° pour un angle, 3 % pour un
+  rapport. Ces marges couvrent le bruit de mesure de l'outil (0,25 mm, 0,7°,
+  0,013 de rapport dans 95 % des cas sur des copies synthétiques numérisées de
+  plusieurs façons) et la lecture à la règle et au rapporteur.
 - Premier essai sur un protocole réel : 124 critères sur 141 identiques à la
   cotation de l'ergothérapeute (kappa de Cohen 0,75).
 
@@ -37,7 +43,9 @@ cotation que l'ergothérapeute valide.
      l'enfant et la **date de passation** : ils sont repris dans le rapport,
      et le pseudonyme dans le nom du dossier des résultats ;
    - cliquez sur **Lancer la correction automatique**.
-4. Les notes s'affichent, les items à vérifier sont surlignés en orange. Le
+4. Les notes s'affichent, les items à vérifier sont surlignés en orange ; la
+   colonne « À vérifier » nomme les critères dont une mesure est proche du
+   seuil (« ⚠ B F »), « ⚠ oui » quand c'est une remarque du rapport. Le
    rapport détaillé et le tableau des notes sont enregistrés dans un dossier
    « Correction NEPSY » à côté des scans. Double-cliquez sur un item pour voir
    son dessin annoté.
@@ -64,7 +72,9 @@ Lancer la fenêtre : `python -m autocorrect_nepsy` (ou `autocorrect-nepsy-gui`).
 - Une page du cahier par page de PDF ou de TIFF (ou par image), **en couleur**,
   à 200 ou 300 dpi, **en taille réelle**, sans redimensionner. Un scan plus fin est
   ramené à 200 dpi, la résolution de réglage de l'outil : il n'apporte rien de
-  plus, et la cotation ne dépend pas de la résolution du scan.
+  plus, et la cotation ne dépend pas de la résolution du scan. En dessous de
+  200 dpi, la correction se fait quand même, avec un avertissement : les traits
+  fins sont moins bien mesurés.
 - Le sens du scan n'a pas d'importance, une légère inclinaison est corrigée.
 - L'enfant dessine au **stylo** (bleu par défaut, voir `--encre`). Les
   annotations de l'ergothérapeute au crayon à papier sont ignorées, y compris
@@ -104,7 +114,8 @@ Sorties dans le dossier choisi :
 
 - `cotation.csv` : notes retenues de chaque critère, par item, avec les
   colonnes `a_verifier`, `verifie` et `corrige` (critères dont l'ergothérapeute
-  a changé la note dans la fenêtre) ;
+  a changé la note dans la fenêtre) ; séparateur point-virgule et encodage
+  UTF-8 avec BOM, pour s'ouvrir directement dans Excel en français ;
 - `cotation_automatique.csv` : proposition de l'outil telle quelle, avant les
   corrections de l'ergothérapeute (identique à `cotation.csv` en ligne de
   commande) ;
@@ -245,6 +256,7 @@ partir du manuel et ne le remplacent pas.
 
 ```bash
 python -m pip install -e ".[test]"
+python -m pyflakes autocorrect_nepsy tests packaging
 pytest
 ```
 

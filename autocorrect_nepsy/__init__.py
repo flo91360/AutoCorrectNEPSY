@@ -1,3 +1,3 @@
 """Correction automatique du subtest Copie de figures de la NEPSY-II."""
 
-__version__ = "0.13.0"
+__version__ = "0.13.1"

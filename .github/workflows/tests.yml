@@ -11,6 +11,8 @@ name: Tests et exécutable Windows
 #   PlaniFiKateur archive chaque Release dans Google Drive.
 # Un commit de PR n'est construit qu'une fois (événement pull_request) ; les
 # push ne déclenchent la CI que sur main.
+# Les actions sont épinglées par empreinte de commit (version en commentaire) :
+# une étiquette déplacée ne change pas la CI. Mise à jour à la main.
 on:
   push:
     branches: [main]
@@ -32,10 +34,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
       - name: Vérifier la version et le CHANGELOG
@@ -70,16 +72,24 @@ jobs:
             systeme: Windows
             python-version: "3.12"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            packaging/contraintes.txt
       # Python 3.12 : versions exactes de l'exécutable (packaging/contraintes.txt) ;
       # Python 3.10 : dernières versions compatibles, pour voir venir les ruptures.
       - name: Installer
         run: python -m pip install -e ".[test]" ${{ matrix.python-version == '3.12' && '-c packaging/contraintes.txt' || '' }}
+      # Noms inutilisés ou non définis, imports en trop : la CI échoue.
+      - name: Analyse statique (pyflakes)
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        run: python -m pyflakes autocorrect_nepsy tests packaging
       - name: Écran virtuel pour les tests de l'interface
         if: runner.os == 'Linux'
         run: sudo apt-get install -y -q xvfb
@@ -105,12 +115,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            packaging/contraintes.txt
       - name: Installer
         run: python -m pip install -e ".[exe]" -c packaging/contraintes.txt
       - name: Construire AutoCorrectNEPSY.exe
@@ -124,7 +138,7 @@ jobs:
           if (-not (Test-Path sortie\cotation.csv)) { throw "cotation.csv absent" }
           Get-Content sortie\cotation.csv
           # Copies fidèles des modèles de la page 2 : 2 points par processus et par item.
-          $rows = @(Import-Csv sortie\cotation.csv)
+          $rows = @(Import-Csv sortie\cotation.csv -Delimiter ';')
           # ($rows.item désignerait la méthode Item du tableau, pas la colonne.)
           $items = ($rows | Select-Object -ExpandProperty item) -join ','
           if ($items -ne '4,5,6,7') { throw "items inattendus : $items" }
@@ -139,7 +153,7 @@ jobs:
             throw "interface : code $($p.ExitCode)"
           }
           "Taille : {0:N0} Mo" -f ((Get-Item dist\AutoCorrectNEPSY.exe).Length / 1MB)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: AutoCorrectNEPSY-windows
           path: dist/AutoCorrectNEPSY.exe

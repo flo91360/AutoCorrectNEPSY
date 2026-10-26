@@ -205,10 +205,9 @@ def score(drawing: Drawing, item: int = 20) -> ItemResult:
                        f"verticale (≤ {VERTICAL_MAX_DEG.text})", high=VERTICAL_MAX_DEG, unit="deg")
     for k in others:
         tilt = _from_horizontal(angles[k])
-        scoring["D"].add(SIDE_MIN_DEG <= tilt <= SIDE_MAX_DEG,
-                         f"pétale {k + 1} à {tilt:.0f}° de l'horizontale "
-                         f"({SIDE_MIN_DEG.text} à {SIDE_MAX_DEG.text})",
-                         near=min(abs(tilt - SIDE_MIN_DEG), abs(tilt - SIDE_MAX_DEG)) <= 2.0)
+        scoring["D"].limit(tilt, f"pétale {k + 1} à {tilt:.0f}° de l'horizontale "
+                           f"({SIDE_MIN_DEG.text} à {SIDE_MAX_DEG.text})", low=SIDE_MIN_DEG,
+                           high=SIDE_MAX_DEG, unit="deg")
 
     for k, (length, width) in enumerate(zip(lengths, widths)):
         scoring["E"].limit(width, f"pétale {k + 1} : largeur {fmt(width)} ≤ {MAX_WIDTH_MM.text}",

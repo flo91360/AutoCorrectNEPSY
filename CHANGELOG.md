@@ -6,6 +6,14 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.13.1] - 2026-10-26
+
+- Marge « limite » calibrée sur l'incertitude de la comparaison avec l'ergothérapeute : 0,5 mm (2 % du seuil pour une longueur), 2° pour un angle, 3 % pour un rapport, sans part proportionnelle pour les angles ; moins d'items signalés à tort (copies fidèles avec un tremblement de 0,5 mm : 5 sur 21 au lieu de 7), aucune note changée et aucun point perdu sans signalement de plus
+- Colonne « À vérifier » de la fenêtre : critères dont une mesure est proche du seuil (« ⚠ B F »)
+- Avertissement pour un scan à moins de 200 dpi (ligne de commande, rapport, fenêtre)
+- cotation.csv et cotation_automatique.csv s'ouvrent directement dans Excel en français (point-virgule, UTF-8 avec BOM)
+- CI : actions GitHub épinglées par empreinte, cache pip, analyse pyflakes
+
 ## [0.13.0] - 2026-10-26
 
 - Seuils du manuel séparés des réglages internes de l'outil dans les 21 items : chacun est déclaré avec son ou ses critères, son unité et une description reformulée, et les textes du rapport citent ces constantes au lieu de recopier les valeurs

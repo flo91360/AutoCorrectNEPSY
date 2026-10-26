@@ -33,7 +33,8 @@ def test_pdf_resolution_is_read(scanned_pdf):
 def test_correct_command_writes_scores_and_report(scanned_pdf, tmp_path, capsys):
     out = tmp_path / "sortie"
     assert main(["corriger", str(scanned_pdf), "--pages", "2", "-o", str(out)]) == 0
-    rows = list(csv.DictReader(open(out / "cotation.csv", encoding="utf-8")))
+    rows = list(csv.DictReader(open(out / "cotation.csv", encoding="utf-8-sig"),
+                               delimiter=";"))
     assert [row["item"] for row in rows] == ["4", "5", "6", "7"]
     for row in rows:
         assert row["motricite_total"] == row["global_total"] == row["local_total"] == "2"
@@ -53,7 +54,8 @@ def test_child_and_session_date_are_in_the_report(scanned_pdf, tmp_path, capsys)
     assert "Enfant : L. M. – passation du 20/10/2026" in capsys.readouterr().out
     assert "Enfant : L. M." in (out / "rapport.html").read_text(encoding="utf-8")
     # Sans vérification, les notes retenues sont celles de l'outil.
-    final, automatic = (list(csv.DictReader(open(out / name, encoding="utf-8")))
+    final, automatic = (list(csv.DictReader(open(out / name, encoding="utf-8-sig"),
+                                            delimiter=";"))
                         for name in ("cotation.csv", "cotation_automatique.csv"))
     assert [row["motricite_A"] for row in final] == [row["motricite_A"] for row in automatic]
 
