@@ -11,48 +11,53 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .shapes import (STRAIGHT_MARGIN_MM, CircleMetrics, circle_metrics, circular_strokes,
                      filled_mask)
 
-GENERAL_MAX_RATIO = 2.0  # grand diamètre d'un cercle / petit diamètre d'un autre
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+GENERAL_MAX_RATIO = threshold(2.0, "G", "rapport du grand diamètre d'un cercle au petit diamètre "
+                              "d'un autre, au plus", "ratio")
+GAP_MM = threshold(5.0, "B", "intervalle ou dépassement d'un cercle qui compte (un seul admis)")
+MIN_OVERLAP_MM = threshold(5.0, "D", "chevauchement de deux cercles voisins (cercle grisé), "
+                           "au moins")
+LOCAL_MAX_CROSS_RATIO = threshold(3.0, "E", "rapport du grand diamètre d'un cercle au petit "
+                                  "diamètre d'un autre, au plus", "ratio")
+LOCAL_MAX_DIAMETER_MM = threshold(35.0, "F", "plus grand diamètre, au plus")
+LOCAL_MAX_OWN_RATIO = threshold(1.5, "F", "rapport des diamètres d'un même cercle, au plus",
+                                "ratio")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 DISTORTION_MAX_RATIO = 2.0  # au-delà, le cercle est jugé déformé
 DISTORTION_MAX_SPREAD = 0.25  # irrégularité du rayon (bosses, renflements)
-GAP_MM = 5.0  # Motricité B : intervalle ou dépassement de plus de 5 mm
-MIN_OVERLAP_MM = 5.0  # Global D : chevauchement (cercle grisé de 5 mm)
-LOCAL_MAX_CROSS_RATIO = 3.0  # Local E
-LOCAL_MAX_DIAMETER_MM = 35.0  # Local F
-LOCAL_MAX_OWN_RATIO = 1.5  # Local F
 RASTER_PX_PER_MM = 8.0  # résolution des calculs de recouvrement
 TOUCH_MM = 0.5  # en dessous, deux contours se touchent
 
 
 def score(drawing: Drawing, item: int = 8) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
+        return scoring.empty()
     circles = circular_strokes(drawing)
     metrics = [circle_metrics(c, drawing.stroke_width) for c in circles]
-    marks = [mk.segment(*m.long_ends, f"Ø {fmt(m.long_diameter)}") for m in metrics]
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {"nombre_cercles": len(circles)}
-    notes: list[str] = []
+    scoring.marks += [mk.segment(*m.long_ends, f"Ø {fmt(m.long_diameter)}") for m in metrics]
+    scoring.measures["nombre_cercles"] = len(circles)
 
     for i, m in enumerate(metrics, start=1):
-        checks["A"].limit(m.longest_straight, f"cercle {i} : section droite "
-                          f"{fmt(m.longest_straight)} < petit diamètre {fmt(m.short_diameter)} "
-                          "(marge de mesure 1 mm)", high=m.short_diameter - STRAIGHT_MARGIN_MM)
+        scoring["A"].limit(m.longest_straight, f"cercle {i} : section droite "
+                           f"{fmt(m.longest_straight)} < petit diamètre {fmt(m.short_diameter)} "
+                           "(marge de mesure 1 mm)", high=m.short_diameter - STRAIGHT_MARGIN_MM)
     if not metrics:
-        checks["A"].fail("aucune figure circulaire reconnue")
+        scoring["A"].fail("aucune figure circulaire reconnue")
     open_or_over = sum(max(m.gap, m.overshoot) > GAP_MM for m in metrics)
-    checks["B"].add(bool(metrics) and open_or_over <= 1,
-                    f"{open_or_over} cercle(s) avec intervalle ou dépassement de plus de 5 mm (1 au plus)")
+    scoring["B"].add(bool(metrics) and open_or_over <= 1,
+                     f"{open_or_over} cercle(s) avec intervalle ou dépassement de plus de "
+                     f"{GAP_MM.text} (1 au plus)")
 
     if len(circles) < 2:
         reason = f"{len(circles)} figure(s) circulaire(s) reconnue(s), il en faut 3"
-        not_recognized(checks, ("G", "C", "D", "E", "F"), reason, notes)
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+        scoring.not_recognized(("G", "C", "D", "E", "F"), reason)
+        return scoring.result()
 
     order = np.argsort([m.center[1] for m in metrics])
     circles = [circles[i] for i in order]
@@ -62,9 +67,9 @@ def score(drawing: Drawing, item: int = 8) -> ItemResult:
     alignment = geo.angle_to_vertical(axis)
     cross_ratio = _cross_ratio(metrics)
     three = len(circles) == 3
-    measures.update({"alignement_deg": alignment, "rapport_diametres_croises": cross_ratio})
-    measures.update({f"cercle{i}_grand_diametre_mm": m.long_diameter
-                     for i, m in enumerate(metrics, start=1)})
+    scoring.measures.update({"alignement_deg": alignment, "rapport_diametres_croises": cross_ratio})
+    scoring.measures.update({f"cercle{i}_grand_diametre_mm": m.long_diameter
+                             for i, m in enumerate(metrics, start=1)})
 
     origin = drawing.points.min(axis=0) - 2
     size = drawing.points.max(axis=0) - origin + 2
@@ -74,8 +79,9 @@ def score(drawing: Drawing, item: int = 8) -> ItemResult:
     overlaps = [width for width, _ in lenses]
     for width, center in lenses:
         if center is not None:
-            marks.append(mk.cercle(origin + center, width / 2, f"chevauchement {fmt(width)}"))
-    measures.update({f"chevauchement_{i + 1}_{i + 2}_mm": w for i, w in enumerate(overlaps)})
+            scoring.marks.append(mk.cercle(origin + center, width / 2,
+                                           f"chevauchement {fmt(width)}"))
+    scoring.measures.update({f"chevauchement_{i + 1}_{i + 2}_mm": w for i, w in enumerate(overlaps)})
     if three:
         neighbours_cut = all(w > 0 for w in overlaps)
         ends_apart = (_overlap_width(masks[0], masks[2]) == 0
@@ -87,36 +93,40 @@ def score(drawing: Drawing, item: int = 8) -> ItemResult:
                       f"cercles voisins qui se coupent : {'oui' if neighbours_cut else 'non'} ; "
                       f"haut et bas séparés : {'oui' if ends_apart else 'non'}")
 
-    general = checks["G"]
+    general = scoring["G"]
     general.add(structure, f"trois cercles alignés verticalement ({structure_text})")
     distorted = [i for i, m in enumerate(metrics, start=1) if _distorted(m)]
     general.add(not distorted, "pas de distorsion majeure" if not distorted
                 else f"distorsion du ou des cercle(s) {', '.join(map(str, distorted))}")
     general.limit(cross_ratio, "grand diamètre / petit diamètre d'un autre cercle : "
-                  f"{fmt_ratio(cross_ratio)} ≤ 2:1", high=GENERAL_MAX_RATIO, unit="ratio")
+                  f"{fmt_ratio(cross_ratio)} ≤ {GENERAL_MAX_RATIO.text}", high=GENERAL_MAX_RATIO,
+                  unit="ratio")
 
-    checks["C"].add(structure, f"seulement trois cercles alignés verticalement ({structure_text})")
+    scoring["C"].add(structure, f"seulement trois cercles alignés verticalement ({structure_text})")
 
     for i, width in enumerate(overlaps, start=1):
-        checks["D"].limit(width, f"chevauchement cercles {i}-{i + 1} : {fmt(width)} ≥ 5 mm",
-                          low=MIN_OVERLAP_MM)
+        scoring["D"].limit(width, f"chevauchement cercles {i}-{i + 1} : {fmt(width)} ≥ "
+                           f"{MIN_OVERLAP_MM.text}",
+                           low=MIN_OVERLAP_MM)
     if not three:
-        checks["D"].fail("il faut trois cercles")
+        scoring["D"].fail("il faut trois cercles")
 
-    checks["E"].limit(cross_ratio, "grand diamètre / petit diamètre d'un autre cercle : "
-                      f"{fmt_ratio(cross_ratio)} ≤ 3:1", high=LOCAL_MAX_CROSS_RATIO, unit="ratio")
+    scoring["E"].limit(cross_ratio, "grand diamètre / petit diamètre d'un autre cercle : "
+                       f"{fmt_ratio(cross_ratio)} ≤ {LOCAL_MAX_CROSS_RATIO.text}",
+                       high=LOCAL_MAX_CROSS_RATIO, unit="ratio")
 
     extras = [s for s in drawing.component_sizes[1:] if s >= 5.0]
-    checks["F"].add(three and not extras,
-                    "aucun autre élément" if three and not extras else "éléments en trop ou manquants")
+    scoring["F"].add(three and not extras, "aucun autre élément" if three and not extras
+                     else "éléments en trop ou manquants")
     longest = max(m.long_diameter for m in metrics)
-    checks["F"].limit(longest, f"plus grand diamètre {fmt(longest)} ≤ 35 mm",
-                      high=LOCAL_MAX_DIAMETER_MM)
+    scoring["F"].limit(longest, f"plus grand diamètre {fmt(longest)} ≤ {LOCAL_MAX_DIAMETER_MM.text}",
+                       high=LOCAL_MAX_DIAMETER_MM)
     worst = max(m.ratio for m in metrics)
-    checks["F"].limit(worst, f"rapport des diamètres d'un même cercle {fmt_ratio(worst)} ≤ 1,5:1",
-                      high=LOCAL_MAX_OWN_RATIO, unit="ratio")
+    scoring["F"].limit(worst, f"rapport des diamètres d'un même cercle {fmt_ratio(worst)} ≤ "
+                       f"{LOCAL_MAX_OWN_RATIO.text}",
+                       high=LOCAL_MAX_OWN_RATIO, unit="ratio")
 
-    return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes, marks)
+    return scoring.result()
 
 
 def _cross_ratio(metrics: list[CircleMetrics]) -> float:

@@ -6,6 +6,13 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.13.0] - 2026-10-26
+
+- Seuils du manuel séparés des réglages internes de l'outil dans les 21 items : chacun est déclaré avec son ou ses critères, son unité et une description reformulée, et les textes du rapport citent ces constantes au lieu de recopier les valeurs
+- Commande « seuils » : liste des 178 seuils du manuel utilisés, item par item (--item N pour un seul item), à vérifier sur le manuel
+- Échafaudage commun Scoring pour les 20 modules d'items : dessin vide et figure non reconnue traités au même endroit
+- Instantané de la cotation sur les copies synthétiques de tous les modèles (tests/test_instantane.py) : la restructuration ne change aucune note
+
 ## [0.12.0] - 2026-10-26
 
 - Vérification par l'ergothérapeute dans la fenêtre (« Vérifier / corriger l'item sélectionné… ») : chaque note d'un item est confirmée ou changée, l'item passe « vérifié », les totaux, cotation.csv (colonnes verifie et corrige) et le rapport suivent

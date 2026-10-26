@@ -19,21 +19,29 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing, StraightLine
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .shapes import (check_lines, dangling_tail, end_at, extra_elements, intersection,
                      review_notes)
 
-STRAIGHT_BAND_MM = 3.0  # Motricité A : barre grisée de 3 mm
-JOIN_MM = 2.0  # Motricité B : intervalle ou dépassement aux intersections
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+STRAIGHT_BAND_MM = threshold(3.0, "A", "largeur de la barre grisée où tient chaque ligne")
+JOIN_MM = threshold(2.0, "B", "intervalle ou dépassement à chaque intersection, au plus")
+GENERAL_MAX_GAP_MM = threshold(3.0, "G", "écart entre la base du triangle et le haut du trapèze, "
+                               "au plus")
+GENERAL_MAX_PARTS_RATIO = threshold(1.5, "G", "rapport des parties du haut du trapèze de part et "
+                                    "d'autre du triangle, au plus", "ratio")
+GLOBAL_MAX_GAP_MM = threshold(5.0, "C", "écart entre la base du triangle et le haut de la "
+                              "figure, au plus")
+LOCAL_MAX_HEIGHT_RATIO = threshold(1.3, "F", "rapport de la hauteur à la base du triangle, au plus",
+                                   "ratio")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 HORIZONTAL_DEG = 30.0  # côtés horizontaux : base du triangle, haut et bas du trapèze
 APEX_MAX_GAP_MM = 8.0  # les deux côtés du triangle se rejoignent au sommet
 CROSSING_MM = 5.0  # côté du triangle qui traverse le haut du trapèze : coin à la traversée
 OWN_BASE_MM = 3.0  # base propre du triangle : ses bouts sont aux coins du triangle
 TOUCH_MM = 1.0  # le bout d'un autre trait touche le côté du triangle
 TAIL_MAX_FRACTION = 0.25  # prolongement coupé : au plus ce quart du côté
-GENERAL_MAX_GAP_MM = 3.0  # base du triangle / côté supérieur du trapèze
-GENERAL_MAX_PARTS_RATIO = 1.5  # parties du côté supérieur de part et d'autre du triangle
-GLOBAL_MAX_GAP_MM = 5.0  # Global C
 # Global D : un côté si courbé que la forme n'est plus reconnaissable (flèche
 # de la courbe, encre non comprise, plus grande que cette part de sa longueur
 # et que la marge de mesure).
@@ -44,27 +52,21 @@ ISOSCELES_MAX_PARALLEL_DEG = 12.0  # côtés supérieur et inférieur parallèle
 ISOSCELES_MIN_LEG_DEG = 8.0  # côtés obliques inclinés (pas un rectangle)
 ISOSCELES_MAX_LEG_DIFF_DEG = 20.0  # côtés obliques symétriques
 ISOSCELES_MAX_LEGS_RATIO = 1.5  # côtés obliques de longueurs voisines
-LOCAL_MAX_HEIGHT_RATIO = 1.3  # Local F : hauteur / base du triangle
 
 
 def score(drawing: Drawing, item: int = 10) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
+        return scoring.empty()
     lines = drawing.significant_lines()
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {"nombre_lignes": len(lines)}
-    notes = review_notes(lines)
-    check_lines(checks["A"], lines, STRAIGHT_BAND_MM)
-    marks: list = [mk.bande(line, at="bout") for line in lines]
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+    scoring.measures["nombre_lignes"] = len(lines)
+    scoring.notes += review_notes(lines)
+    check_lines(scoring["A"], lines, STRAIGHT_BAND_MM)
+    scoring.marks += [mk.bande(line, at="bout") for line in lines]
 
     def fail(reason: str) -> ItemResult:
-        not_recognized(checks, ("G", "B", "C", "D", "E", "F"), reason, notes)
-        return result()
+        scoring.not_recognized(("G", "B", "C", "D", "E", "F"), reason)
+        return scoring.result()
 
     sides = _triangle_sides(lines)
     if sides is None:
@@ -118,20 +120,21 @@ def score(drawing: Drawing, item: int = 10) -> ItemResult:
             else pl + geo.unit(pr - pl) * float((apex - pl) @ geo.unit(pr - pl)))
     height = float(np.linalg.norm(apex - foot))
     height_ratio = height / max(base_length, 1e-6)
-    measures.update({"base_triangle_mm": base_length, "cote_haut_trapeze_mm": top_length,
-                     "hauteur_triangle_mm": height, "ecart_base_mm": gap,
-                     "partie_gauche_mm": left_part, "partie_droite_mm": right_part,
-                     "rapport_parties_haut": parts_ratio, "rapport_hauteur_base": height_ratio})
+    scoring.measures.update({"base_triangle_mm": base_length, "cote_haut_trapeze_mm": top_length,
+                             "hauteur_triangle_mm": height, "ecart_base_mm": gap,
+                             "partie_gauche_mm": left_part, "partie_droite_mm": right_part,
+                             "rapport_parties_haut": parts_ratio,
+                             "rapport_hauteur_base": height_ratio})
 
-    marks += [mk.cote(pl, pr, f"base {fmt(base_length)}", side=(0.0, -1.0)),
-              mk.cote(tl, tr, f"haut {fmt(top_length)}", side=(0.0, 1.0)),
-              mk.segment(apex, foot, f"hauteur {fmt(height)}")]
+    scoring.marks += [mk.cote(pl, pr, f"base {fmt(base_length)}", side=(0.0, -1.0)),
+                      mk.cote(tl, tr, f"haut {fmt(top_length)}", side=(0.0, 1.0)),
+                      mk.segment(apex, foot, f"hauteur {fmt(height)}")]
     if min(left_part, right_part) > 0:
-        marks += [mk.segment(tl, tl + along * left_part, fmt(left_part)),
-                  mk.segment(tr - along * right_part, tr, fmt(right_part))]
+        scoring.marks += [mk.segment(tl, tl + along * left_part, fmt(left_part)),
+                          mk.segment(tr - along * right_part, tr, fmt(right_part))]
     if gap > 0.5:
         worst = (pl, pr)[int(np.argmax(corner_gaps))]
-        marks.append(mk.point(worst, f"écart {fmt(gap)}"))
+        scoring.marks.append(mk.point(worst, f"écart {fmt(gap)}"))
 
     def junction(name: str, point: np.ndarray, *meeting: StraightLine,
                  extra: float = 0.0) -> tuple[str, np.ndarray, float]:
@@ -149,45 +152,47 @@ def score(drawing: Drawing, item: int = 10) -> ItemResult:
                  junction("coin gauche du triangle", pl, left, extra=corner_gaps[0]),
                  junction("coin droit du triangle", pr, right, extra=corner_gaps[1])]
     worst_name, worst_point, worst_value = max(junctions, key=lambda j: j[2])
-    measures["jonction_max_mm"] = worst_value
+    scoring.measures["jonction_max_mm"] = worst_value
     if worst_value > 0.5:
-        marks.append(mk.point(worst_point, f"{worst_name} {fmt(worst_value)}"))
-    checks["B"].limit(worst_value, f"plus grand intervalle ou dépassement aux intersections "
-                      f"{fmt(worst_value)} ({worst_name}) ≤ 2 mm", high=JOIN_MM)
+        scoring.marks.append(mk.point(worst_point, f"{worst_name} {fmt(worst_value)}"))
+    scoring["B"].limit(worst_value, f"plus grand intervalle ou dépassement aux intersections "
+                       f"{fmt(worst_value)} ({worst_name}) ≤ {JOIN_MM.text}", high=JOIN_MM)
 
     curved = [l for l in figure
               if l.width - l.stroke_width > max(CURVED_FRACTION * l.length, CURVED_MIN_MM)]
     trapezoid, trapezoid_text = _isosceles(tl, tr, br, bl)
 
-    general = checks["G"]
+    general = scoring["G"]
     general.add(trapezoid and not curved, "triangle au-dessus d'un trapèze isocèle, sans "
                 "distorsion majeure" if trapezoid and not curved
                 else f"triangle au-dessus d'un trapèze isocèle : non ({trapezoid_text})")
     general.add(base_length < top_length, f"base du triangle {fmt(base_length)} plus courte "
                 f"que le haut du trapèze {fmt(top_length)}")
-    general.limit(gap, f"écart base du triangle / haut du trapèze {fmt(gap)} ≤ 3 mm",
+    general.limit(gap, f"écart base du triangle / haut du trapèze {fmt(gap)} ≤ "
+                  f"{GENERAL_MAX_GAP_MM.text}",
                   high=GENERAL_MAX_GAP_MM)
     general.limit(parts_ratio, f"parties du haut du trapèze de part et d'autre du triangle "
                   f"({fmt(left_part)} et {fmt(right_part)}) : rapport {fmt_ratio(parts_ratio)} "
-                  "≤ 1,5:1", high=GENERAL_MAX_PARTS_RATIO, unit="ratio")
+                  f"≤ {GENERAL_MAX_PARTS_RATIO.text}", high=GENERAL_MAX_PARTS_RATIO, unit="ratio")
 
-    checks["C"].add(True, "triangle au-dessus d'une figure à quatre côtés")
-    checks["C"].limit(gap, f"écart base du triangle / haut de la figure {fmt(gap)} ≤ 5 mm",
-                      high=GLOBAL_MAX_GAP_MM)
-    checks["C"].add(base_length < top_length, f"base du triangle {fmt(base_length)} plus courte "
-                    f"que le haut de la figure {fmt(top_length)}")
+    scoring["C"].add(True, "triangle au-dessus d'une figure à quatre côtés")
+    scoring["C"].limit(gap, f"écart base du triangle / haut de la figure {fmt(gap)} ≤ "
+                       f"{GLOBAL_MAX_GAP_MM.text}",
+                       high=GLOBAL_MAX_GAP_MM)
+    scoring["C"].add(base_length < top_length, f"base du triangle {fmt(base_length)} plus courte "
+                     f"que le haut de la figure {fmt(top_length)}")
 
-    checks["D"].add(not curved, "aucun côté courbe" if not curved
-                    else f"{len(curved)} côté(s) trop courbé(s)")
+    scoring["D"].add(not curved, "aucun côté courbe" if not curved
+                     else f"{len(curved)} côté(s) trop courbé(s)")
 
-    checks["E"].add(trapezoid, f"triangle et trapèze isocèle ({trapezoid_text})")
+    scoring["E"].add(trapezoid, f"triangle et trapèze isocèle ({trapezoid_text})")
 
     extras = extra_elements(drawing, owned)
-    checks["F"].add(not extras, "aucun autre élément" if not extras
-                    else f"{len(extras)} élément(s) en trop")
-    checks["F"].limit(height_ratio, f"hauteur / base du triangle {fmt_ratio(height_ratio)} "
-                      "≤ 1,3:1", high=LOCAL_MAX_HEIGHT_RATIO, unit="ratio")
-    return result()
+    scoring["F"].add(not extras, "aucun autre élément" if not extras
+                     else f"{len(extras)} élément(s) en trop")
+    scoring["F"].limit(height_ratio, f"hauteur / base du triangle {fmt_ratio(height_ratio)} "
+                       f"≤ {LOCAL_MAX_HEIGHT_RATIO.text}", high=LOCAL_MAX_HEIGHT_RATIO, unit="ratio")
+    return scoring.result()
 
 
 def _top(line: StraightLine) -> np.ndarray:

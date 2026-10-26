@@ -16,8 +16,24 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Blob, Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, not_recognized
+from .base import ItemResult, Scoring, fmt, manual_thresholds
 
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+GENERAL_COUNT = (threshold(9, "G", "nombre de cercles pleins, au moins", "nombre"),
+                 threshold(11, "G", "nombre de cercles pleins, au plus", "nombre"))
+GENERAL_MAX_DIAMETER_MM = threshold(5.0, "G", "diamètre de la plus grande marque, au plus")
+ANGLE_RANGE = (threshold(30.0, "GD", "angle de la rangée avec l'horizontale, au moins", "deg"),
+               threshold(60.0, "GD", "angle de la rangée avec l'horizontale, au plus", "deg"))
+MOTOR_MAX_DIAMETER_MM = threshold(3.0, "A", "diamètre d'une marque au-delà duquel elle compte "
+                                  "(au plus la moitié des marques)")
+GLOBAL_MIN_MARKS = threshold(6, "C", "marques alignées, au moins", "nombre")
+LOCAL_COUNT = threshold(10, "E", "nombre de cercles pleins, exactement", "nombre")
+LOCAL_MIN_GAP_MM = threshold(2.0, "E", "écart bord à bord entre marques voisines, au moins")
+LOCAL_MAX_GAP_MM = threshold(5.0, "F", "écart bord à bord entre marques voisines, au plus")
+LOCAL_MAX_LENGTH_MM = threshold(60.0, "F", "longueur de la rangée, du premier au dernier cercle "
+                                "plein, au plus")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 POINT_MAX_MM = 1.2  # tache plus petite : simple point de stylo
 # Un tiret est allongé et fin (épaisseur moyenne d'un trait de stylo) ; un
 # cercle plein aplati reste plus épais. Très allongée, une tache est un tiret.
@@ -29,15 +45,6 @@ EMPTY_MIN_HOLE = 0.2  # part non encrée à l'intérieur d'un cercle vide
 MARK_MAX_MM = 10.0  # au-delà, ce n'est plus une marque mais un autre élément
 ROW_DISTANCE_MM = 6.0  # marque plus éloignée de la ligne : hors de la rangée
 DUST_MM = 1.0  # tache isolée plus petite, hors de la rangée : poussière, ignorée
-GENERAL_COUNT = (9, 11)  # nombre de cercles pleins
-GENERAL_MAX_DIAMETER_MM = 5.0
-ANGLE_RANGE = (30.0, 60.0)  # Général et Global D, par rapport à l'horizontale
-MOTOR_MAX_DIAMETER_MM = 3.0  # Motricité A : au plus la moitié des marques au-delà
-GLOBAL_MIN_MARKS = 6  # Global C
-LOCAL_COUNT = 10  # Local E
-LOCAL_MIN_GAP_MM = 2.0  # Local E : écart bord à bord entre cercles voisins
-LOCAL_MAX_GAP_MM = 5.0  # Local F
-LOCAL_MAX_LENGTH_MM = 60.0  # Local F : du cercle le plus à gauche au plus à droite
 
 FILLED, POINT, DASH, EMPTY = "cercle plein", "point", "tiret", "cercle vide"
 SHORT_NAMES = {FILLED: "plein", POINT: "point", DASH: "tiret", EMPTY: "vide"}
@@ -64,39 +71,34 @@ def kind_of(blob: Blob) -> str:
 
 
 def score(drawing: Drawing, item: int = 9) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if not drawing.blobs:
-        return empty_result(item, codes, "aucun tracé dans la zone")
+        return scoring.empty()
     candidates = [Mark(b, kind_of(b)) for b in drawing.blobs if b.diameter <= MARK_MAX_MM]
     others = [b for b in drawing.blobs if b.diameter > MARK_MAX_MM]
     row, off_row, axis = _row(candidates)
     off_row = [m for m in off_row if m.blob.length >= DUST_MM]
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {"nombre_marques": len(candidates)}
+    scoring.measures["nombre_marques"] = len(candidates)
     side = np.array([axis[1], -axis[0]]) if axis is not None else np.array([1.0, 0.0])
     if side[0] < 0:
         side = -side
-    marks: list = [mk.tache(m.blob.outline, f"{SHORT_NAMES[m.kind]} {fmt(m.blob.diameter, '')}",
-                            m.kind == FILLED, side) for m in row + off_row]
-    notes: list[str] = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+    scoring.marks += [mk.tache(m.blob.outline, f"{SHORT_NAMES[m.kind]} {fmt(m.blob.diameter, '')}",
+                               m.kind == FILLED, side) for m in row + off_row]
 
     all_marks = row + off_row
     large = sum(m.blob.diameter > MOTOR_MAX_DIAMETER_MM for m in all_marks)
-    checks["A"].add(bool(all_marks) and large <= len(all_marks) / 2,
-                    f"{large} marque(s) sur {len(all_marks)} de plus de 3 mm de diamètre "
-                    "(au plus la moitié)")
+    scoring["A"].add(bool(all_marks) and large <= len(all_marks) / 2,
+                     f"{large} marque(s) sur {len(all_marks)} de plus de "
+                     f"{MOTOR_MAX_DIAMETER_MM.text} de diamètre "
+                     "(au plus la moitié)")
     dashes = sum(m.kind == DASH for m in all_marks)
-    checks["B"].add(bool(all_marks) and dashes == 0,
-                    "aucun tiret" if not dashes else f"{dashes} tiret(s)")
+    scoring["B"].add(bool(all_marks) and dashes == 0,
+                     "aucun tiret" if not dashes else f"{dashes} tiret(s)")
 
     if axis is None:
         reason = f"{len(row)} marque(s) alignée(s) : rangée non reconnue"
-        not_recognized(checks, ("G", "C", "D", "E", "F"), reason, notes)
-        return result()
+        scoring.not_recognized(("G", "C", "D", "E", "F"), reason)
+        return scoring.result()
 
     order = np.argsort([m.blob.center @ axis for m in row])
     row = [row[i] for i in order]
@@ -114,58 +116,64 @@ def score(drawing: Drawing, item: int = 9) -> ItemResult:
     # Longueur de la rangée, du cercle plein le plus à gauche au plus à droite.
     ends = (filled[0], filled[-1]) if len(filled) >= 2 else (row[0], row[-1])
     length = float(np.linalg.norm(ends[1].blob.center - ends[0].blob.center))
-    measures.update({"nombre_cercles_pleins": len(filled), "angle_deg": rise,
-                     "longueur_mm": length})
+    scoring.measures.update({"nombre_cercles_pleins": len(filled), "angle_deg": rise,
+                             "longueur_mm": length})
     if gaps:
-        measures.update({"ecart_min_mm": min(gaps), "ecart_max_mm": max(gaps)})
+        scoring.measures.update({"ecart_min_mm": min(gaps), "ecart_max_mm": max(gaps)})
 
     low_end = first if first[1] >= last[1] else last
     high_end = last if low_end is first else first
-    marks.append(mk.angle(low_end, high_end, low_end + np.array([10.0, 0.0]) * np.sign(
+    scoring.marks.append(mk.angle(low_end, high_end, low_end + np.array([10.0, 0.0]) * np.sign(
         high_end[0] - low_end[0] or 1), f"{abs(rise):.0f}°"))
-    marks.append(mk.cote(ends[0].blob.center, ends[1].blob.center, f"longueur {fmt(length)}",
-                         side=-side))
+    scoring.marks.append(mk.cote(ends[0].blob.center, ends[1].blob.center,
+                                 f"longueur {fmt(length)}", side=-side))
     if gaps:
-        for label, index in (("écart min", int(np.argmin(gaps))), ("écart max", int(np.argmax(gaps)))):
+        for label, index in (("écart min", int(np.argmin(gaps))),
+                             ("écart max", int(np.argmax(gaps)))):
             a, b = _closest_points(row[index].blob, row[index + 1].blob)
-            marks.append(mk.segment(a, b, f"{label} {fmt(gaps[index])}", side=-side))
+            scoring.marks.append(mk.segment(a, b, f"{label} {fmt(gaps[index])}", side=-side))
             if len(gaps) == 1:
                 break
 
     count_text = ", ".join(f"{n} {kind}(s)" for kind, n in kinds.items() if n)
     lo, hi = ANGLE_RANGE
-    general = checks["G"]
-    general.add(GENERAL_COUNT[0] <= len(filled) <= GENERAL_COUNT[1] and not_filled == 0,
-                f"9 à 11 cercles pleins, sans point, tiret ni cercle vide ({count_text})")
+    general = scoring["G"]
+    fewest, most = GENERAL_COUNT
+    general.add(fewest <= len(filled) <= most and not_filled == 0,
+                f"{fewest.text} à {most.text} cercles pleins, sans point, tiret ni cercle vide "
+                f"({count_text})")
     biggest = max(m.blob.diameter for m in row)
-    general.limit(biggest, f"plus grande marque {fmt(biggest)} ≤ 5 mm", high=GENERAL_MAX_DIAMETER_MM)
+    general.limit(biggest, f"plus grande marque {fmt(biggest)} ≤ {GENERAL_MAX_DIAMETER_MM.text}",
+                  high=GENERAL_MAX_DIAMETER_MM)
     general.limit(rise, f"rangée montant de gauche à droite à {rise:.0f}° de l'horizontale "
-                  "(entre 30° et 60°)", low=lo, high=hi, unit="deg")
+                  f"(entre {lo.text} et {hi.text})", low=lo, high=hi, unit="deg")
 
-    checks["C"].add(len(row) >= GLOBAL_MIN_MARKS, f"{len(row)} marque(s) alignée(s) (au moins 6)")
-    checks["C"].limit(rise, f"rangée montant de gauche à droite ({rise:.0f}°)", low=0.0001,
-                      high=90.0, unit="deg")
+    scoring["C"].add(len(row) >= GLOBAL_MIN_MARKS, f"{len(row)} marque(s) alignée(s) "
+                     f"(au moins {GLOBAL_MIN_MARKS.text})")
+    scoring["C"].limit(rise, f"rangée montant de gauche à droite ({rise:.0f}°)", low=0.0001,
+                       high=90.0, unit="deg")
 
-    checks["D"].limit(rise, f"rangée à {rise:.0f}° de l'horizontale (entre 30° et 60°)",
-                      low=lo, high=hi, unit="deg")
+    scoring["D"].limit(rise, f"rangée à {rise:.0f}° de l'horizontale (entre {lo.text} et "
+                       f"{hi.text})",
+                       low=lo, high=hi, unit="deg")
 
     only_filled = not_filled == 0 and not off_row
     filled_text = ("marques toutes en cercles pleins" if only_filled
                    else f"marques qui ne sont pas des cercles pleins ({count_text})")
-    checks["E"].add(only_filled, filled_text)
-    checks["E"].add(len(filled) == LOCAL_COUNT, f"{len(filled)} cercle(s) plein(s) (dix)")
-    checks["F"].add(only_filled, filled_text)
+    scoring["E"].add(only_filled, filled_text)
+    scoring["E"].add(len(filled) == LOCAL_COUNT, f"{len(filled)} cercle(s) plein(s) (dix)")
+    scoring["F"].add(only_filled, filled_text)
     if gaps:
-        checks["E"].limit(min(gaps), f"plus petit écart entre marques voisines {fmt(min(gaps))} "
-                          "≥ 2 mm", low=LOCAL_MIN_GAP_MM)
-        checks["F"].limit(max(gaps), f"plus grand écart entre marques voisines {fmt(max(gaps))} "
-                          "≤ 5 mm", high=LOCAL_MAX_GAP_MM)
+        scoring["E"].limit(min(gaps), f"plus petit écart entre marques voisines {fmt(min(gaps))} "
+                           f"≥ {LOCAL_MIN_GAP_MM.text}", low=LOCAL_MIN_GAP_MM)
+        scoring["F"].limit(max(gaps), f"plus grand écart entre marques voisines {fmt(max(gaps))} "
+                           f"≤ {LOCAL_MAX_GAP_MM.text}", high=LOCAL_MAX_GAP_MM)
     extras = len(others) + len(off_row) + max(0, len(filled) - LOCAL_COUNT)
-    checks["F"].add(extras == 0, "aucun autre élément" if not extras
-                    else f"{extras} élément(s) en trop")
-    checks["F"].limit(length, f"longueur de la rangée {fmt(length)} ≤ 60 mm",
-                      high=LOCAL_MAX_LENGTH_MM)
-    return result()
+    scoring["F"].add(extras == 0, "aucun autre élément" if not extras
+                     else f"{extras} élément(s) en trop")
+    scoring["F"].limit(length, f"longueur de la rangée {fmt(length)} ≤ {LOCAL_MAX_LENGTH_MM.text}",
+                       high=LOCAL_MAX_LENGTH_MM)
+    return scoring.result()
 
 
 def _row(candidates: list[Mark]) -> tuple[list[Mark], list[Mark], np.ndarray | None]:

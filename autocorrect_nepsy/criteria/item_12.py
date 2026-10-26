@@ -13,109 +13,119 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import STEP_MM, Drawing
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .curves import Curve, InkGraph, crossing, extrema
 from .shapes import EXTRA_ELEMENT_MM
 
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+MOTOR_MAX_EXTRA_CHANGES = threshold(3, "A", "changements de direction par ligne en plus du « S », "
+                                    "au plus", "nombre")
+MOTOR_MAX_INTERRUPTIONS = threshold(2, "B", "interruptions par ligne, au plus", "nombre")
+CROSSING_THIRD = (threshold(1 / 3, "G", "position du croisement sur la corde de chaque ligne, "
+                            "au moins (tiers central)", "part"),
+                  threshold(2 / 3, "G", "position du croisement sur la corde de chaque ligne, "
+                            "au plus (tiers central)", "part"))
+CHORD_MAX_DEG = threshold(15.0, "CD", "écart de la corde de chaque ligne à son axe, au plus", "deg")
+GLOBAL_MAX_SEGMENT_RATIO = threshold(1.2, "D", "rapport des bouts de chaque ligne de part et "
+                                     "d'autre du croisement, au plus", "ratio")
+LOCAL_MAX_CHORD_MM = threshold(50.0, "F", "longueur de chaque ligne d'une extrémité à l'autre, "
+                               "au plus")
+LOCAL_MAX_LENGTH_RATIO = threshold(1.3, "F", "rapport de la ligne verticale à l'horizontale, "
+                                   "au plus", "ratio")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 WOBBLE_MM = 0.8  # amplitude d'une ondulation de la main (Motricité A)
 SHAPE_MM = 2.0  # amplitude minimale d'une crête ou d'un creux du « S »
 SHAPE_FRACTION = 0.08  # … ou cette part de la corde, si elle est plus grande
 STIMULUS_CHANGES = 2  # une crête et un creux : changements de direction du modèle
-MOTOR_MAX_EXTRA_CHANGES = 3  # Motricité A, par ligne
-MOTOR_MAX_INTERRUPTIONS = 2  # Motricité B, par ligne
 AXIS_TOUCH_MM = 1.0  # une extrémité à moins de cette distance touche l'axe
 CROSS_MAX_GAP_MM = 1.0  # les deux lignes se coupent
-CHORD_MAX_DEG = 15.0  # Global C (horizontale) et D (verticale)
-GLOBAL_MAX_SEGMENT_RATIO = 1.2  # Global D : bouts de part et d'autre du croisement
-LOCAL_MAX_CHORD_MM = 50.0  # Local F
-LOCAL_MAX_LENGTH_RATIO = 1.3  # Local F : verticale / horizontale
 ON_CURVE_MM = 1.5  # encre plus éloignée des deux lignes : autre élément
 
 
 def score(drawing: Drawing, item: int = 12) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {}
-    marks: list = []
-    notes: list[str] = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+        return scoring.empty()
 
     graph = InkGraph(drawing.strokes)
     tips = _tips(graph)
-    measures["extremites_libres"] = len(graph.free_ends())
+    scoring.measures["extremites_libres"] = len(graph.free_ends())
     curves = _curves(graph, tips) if len(tips) == 4 else None
     if curves is None:
         reason = (f"deux lignes qui se croisent non reconnues ({len(tips)} extrémité(s) "
                   "libre(s), il en faut 4)")
-        not_recognized(checks, codes, reason, notes)
-        return result()
+        scoring.not_recognized(scoring.codes, reason)
+        return scoring.result()
     horizontal, vertical = curves
     x = crossing(horizontal, vertical)
     cross_gap = _gap(horizontal, vertical)
     lines = {"horizontale": horizontal, "verticale": vertical}
     info = {name: _describe(curve, x, name == "verticale") for name, curve in lines.items()}
     for color, (name, d) in enumerate(info.items()):
-        measures.update({f"{name}_corde_mm": d["chord"], f"{name}_angle_deg": d["angle"],
-                         f"{name}_rapport_bouts": d["ratio"], f"{name}_croisement": d["at"]})
-        marks.append(mk.trace(lines[name].points, f"ligne {name}", color))
-        marks.append(mk.segment(lines[name].start, lines[name].end,
-                                f"{fmt(d['chord'])} · {d['angle']:.0f}°"))
-    marks.append(mk.point(x, "croisement"))
+        scoring.measures.update({f"{name}_corde_mm": d["chord"], f"{name}_angle_deg": d["angle"],
+                                 f"{name}_rapport_bouts": d["ratio"],
+                                 f"{name}_croisement": d["at"]})
+        scoring.marks.append(mk.trace(lines[name].points, f"ligne {name}", color))
+        scoring.marks.append(mk.segment(lines[name].start, lines[name].end,
+                                        f"{fmt(d['chord'])} · {d['angle']:.0f}°"))
+    scoring.marks.append(mk.point(x, "croisement"))
 
     for name, curve in lines.items():
         d = info[name]
-        checks["A"].add(d["extra_changes"] <= MOTOR_MAX_EXTRA_CHANGES,
-                        f"ligne {name} : {d['extra_changes']} changement(s) de direction en plus "
-                        "du « S » (3 au plus)")
-        checks["B"].add(curve.interruptions <= MOTOR_MAX_INTERRUPTIONS,
-                        f"ligne {name} : {curve.interruptions} interruption(s) (2 au plus)")
+        scoring["A"].add(d["extra_changes"] <= MOTOR_MAX_EXTRA_CHANGES,
+                         f"ligne {name} : {d['extra_changes']} changement(s) de direction en plus "
+                         f"du « S » ({MOTOR_MAX_EXTRA_CHANGES.text} au plus)")
+        scoring["B"].add(curve.interruptions <= MOTOR_MAX_INTERRUPTIONS,
+                         f"ligne {name} : {curve.interruptions} interruption(s) "
+                         f"({MOTOR_MAX_INTERRUPTIONS.text} au plus)")
 
-    general = checks["G"]
+    general = scoring["G"]
+    first, last = CROSSING_THIRD
     for name, d in info.items():
         general.add(d["s_shape"] and len(d["extrema"]) <= 2 and d["oriented"],
                     f"ligne {name} en « S », dans le sens du modèle, sans distorsion "
                     f"({_shape_text(d)})")
         general.limit(d["at"], f"ligne {name} : croisement au {d['at'] * 100:.0f} % de sa corde "
-                      "(tiers central : 33 à 67 %)", low=1 / 3, high=2 / 3, unit="part")
+                      "(tiers central : 33 à 67 %)", low=first, high=last, unit="part")
         general.add(d["tips_ok"], f"ligne {name} : extrémités qui touchent ou recoupent l'axe "
                     f"passant par le croisement ({d['tips_text']})")
 
     curved = all(np.abs(c.offsets()).max() >= SHAPE_MM for c in lines.values())
-    checks["C"].add(curved and cross_gap <= CROSS_MAX_GAP_MM, "deux lignes courbes qui se coupent")
-    checks["C"].limit(info["horizontale"]["angle"], "corde de la ligne horizontale à "
-                      f"{info['horizontale']['angle']:.0f}° de l'horizontale (≤ 15°)",
-                      high=CHORD_MAX_DEG, unit="deg")
+    scoring["C"].add(curved and cross_gap <= CROSS_MAX_GAP_MM,
+                     "deux lignes courbes qui se coupent")
+    scoring["C"].limit(info["horizontale"]["angle"], "corde de la ligne horizontale à "
+                       f"{info['horizontale']['angle']:.0f}° de l'horizontale "
+                       f"(≤ {CHORD_MAX_DEG.text})",
+                       high=CHORD_MAX_DEG, unit="deg")
 
-    checks["D"].limit(info["verticale"]["angle"], "corde de la ligne verticale à "
-                      f"{info['verticale']['angle']:.0f}° de la verticale (≤ 15°)",
-                      high=CHORD_MAX_DEG, unit="deg")
+    scoring["D"].limit(info["verticale"]["angle"], "corde de la ligne verticale à "
+                       f"{info['verticale']['angle']:.0f}° de la verticale (≤ {CHORD_MAX_DEG.text})",
+                       high=CHORD_MAX_DEG, unit="deg")
     for name, d in info.items():
-        checks["D"].limit(d["ratio"], f"ligne {name} : bouts de {fmt(d['ends'][0])} et "
-                          f"{fmt(d['ends'][1])} depuis le croisement, rapport {fmt_ratio(d['ratio'])} "
-                          "≤ 1,2:1", high=GLOBAL_MAX_SEGMENT_RATIO, unit="ratio")
+        scoring["D"].limit(d["ratio"], f"ligne {name} : bouts de {fmt(d['ends'][0])} et "
+                           f"{fmt(d['ends'][1])} depuis le croisement, rapport "
+                           f"{fmt_ratio(d['ratio'])} ≤ {GLOBAL_MAX_SEGMENT_RATIO.text}",
+                           high=GLOBAL_MAX_SEGMENT_RATIO, unit="ratio")
 
     extras = _extras(drawing, list(lines.values()))
-    checks["E"].add(not extras, "seulement deux lignes" if not extras
-                    else f"{len(extras)} trait(s) en plus des deux lignes")
+    scoring["E"].add(not extras, "seulement deux lignes" if not extras
+                     else f"{len(extras)} trait(s) en plus des deux lignes")
     for name, d in info.items():
-        checks["E"].add(d["s_shape"], f"ligne {name} sinusoïdale : une crête et un creux "
-                        f"({_shape_text(d)})")
+        scoring["E"].add(d["s_shape"], f"ligne {name} sinusoïdale : une crête et un creux "
+                         f"({_shape_text(d)})")
 
-    checks["F"].add(not extras, "aucun autre élément" if not extras
-                    else f"{len(extras)} élément(s) en trop")
+    scoring["F"].add(not extras, "aucun autre élément" if not extras
+                     else f"{len(extras)} élément(s) en trop")
     for name, d in info.items():
-        checks["F"].limit(d["chord"], f"ligne {name} : {fmt(d['chord'])} d'une extrémité à "
-                          "l'autre (≤ 50 mm)", high=LOCAL_MAX_CHORD_MM)
+        scoring["F"].limit(d["chord"], f"ligne {name} : {fmt(d['chord'])} d'une extrémité à "
+                           f"l'autre (≤ {LOCAL_MAX_CHORD_MM.text})", high=LOCAL_MAX_CHORD_MM)
     ratio = info["verticale"]["chord"] / max(info["horizontale"]["chord"], 1e-6)
-    measures["rapport_verticale_horizontale"] = ratio
-    checks["F"].limit(ratio, f"longueur verticale / horizontale {fmt_ratio(ratio)} ≤ 1,3:1",
-                      high=LOCAL_MAX_LENGTH_RATIO, unit="ratio")
-    return result()
+    scoring.measures["rapport_verticale_horizontale"] = ratio
+    scoring["F"].limit(ratio, f"longueur verticale / horizontale {fmt_ratio(ratio)} ≤ "
+                       f"{LOCAL_MAX_LENGTH_RATIO.text}",
+                       high=LOCAL_MAX_LENGTH_RATIO, unit="ratio")
+    return scoring.result()
 
 
 def _tips(graph: InkGraph) -> list[int]:

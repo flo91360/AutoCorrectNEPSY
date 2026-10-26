@@ -9,21 +9,28 @@ import numpy as np
 
 from .. import geometry as geo
 from ..strokes import Drawing, StraightLine
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import Checks, ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from . import marks as mk
 from .shapes import (check_direction_changes, check_lines, extra_elements, intersection,
                      outside, review_notes)
 
-AXIS_DEG = 20.0  # Général et Global C : écart à l'axe
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+AXIS_DEG = threshold(20.0, "GC", "écart de chaque ligne à son axe, au plus", "deg")
+GENERAL_MAX_RATIO = threshold(2.0, "G", "rapport des segments extérieurs de l'horizontale, et "
+                              "des segments verticaux opposés, au plus", "ratio")
+MAX_INTERRUPTIONS = threshold(2, "A", "interruptions par ligne, au plus", "nombre")
+STRAIGHT_BAND_MM = threshold(3.0, "A", "largeur de la barre grisée où tient chaque ligne")
+MAX_DIRECTION_CHANGES = threshold(3, "B", "changements de direction par ligne, au plus", "nombre")
+CROSSING_ANGLES = (threshold(60.0, "C", "angle de chaque croisement, au moins", "deg"),
+                   threshold(120.0, "C", "angle de chaque croisement, au plus", "deg"))
+GLOBAL_MAX_PAIR_RATIO = threshold(1.2, "D", "rapport des segments verticaux opposés, au plus",
+                                  "ratio")
+LOCAL_MIN_HORIZONTAL_MM = threshold(20.0, "E", "longueur de la ligne horizontale, au moins")
+LOCAL_MAX_RATIO = threshold(2.0, "F", "rapport du segment central aux segments latéraux, au plus",
+                            "ratio")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 CROSSING_TOLERANCE_MM = 1.0  # l'intersection doit tomber sur les deux tracés
-GENERAL_MAX_RATIO = 2.0
-MAX_INTERRUPTIONS = 2  # Motricité A
-STRAIGHT_BAND_MM = 3.0  # Motricité A
-MAX_DIRECTION_CHANGES = 3  # Motricité B
-CROSSING_ANGLES = (60.0, 120.0)  # Global C
-GLOBAL_MAX_PAIR_RATIO = 1.2  # Global D
-LOCAL_MIN_HORIZONTAL_MM = 20.0  # Local E
-LOCAL_MAX_RATIO = 2.0  # Local F
 
 
 def _above_below(line: StraightLine, point) -> tuple[float, float]:
@@ -35,43 +42,38 @@ def _above_below(line: StraightLine, point) -> tuple[float, float]:
 
 
 def score(drawing: Drawing, item: int = 7) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
+        return scoring.empty()
     lines = drawing.significant_lines()
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {"nombre_lignes": len(lines)}
-    notes = review_notes(lines)
-    check_lines(checks["A"], lines, STRAIGHT_BAND_MM, MAX_INTERRUPTIONS)
-    check_direction_changes(checks["B"], lines, MAX_DIRECTION_CHANGES)
+    scoring.measures["nombre_lignes"] = len(lines)
+    scoring.notes += review_notes(lines)
+    check_lines(scoring["A"], lines, STRAIGHT_BAND_MM, MAX_INTERRUPTIONS)
+    check_direction_changes(scoring["B"], lines, MAX_DIRECTION_CHANGES)
 
-    marks: list = [mk.bande(line, at="bout") for line in lines]
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+    scoring.marks += [mk.bande(line, at="bout") for line in lines]
 
     horizontals = [l for l in lines if l.angle_to_horizontal() <= 45]
     verticals = [l for l in lines if l.angle_to_horizontal() > 45]
     if horizontals:
-        checks["E"].limit(horizontals[0].length,
-                          f"ligne horizontale entière {fmt(horizontals[0].length)} ≥ 20 mm",
-                          low=LOCAL_MIN_HORIZONTAL_MM)
+        scoring["E"].limit(horizontals[0].length,
+                           f"ligne horizontale entière {fmt(horizontals[0].length)} ≥ "
+                           f"{LOCAL_MIN_HORIZONTAL_MM.text}",
+                           low=LOCAL_MIN_HORIZONTAL_MM)
     else:
-        checks["E"].fail("aucune ligne horizontale")
+        scoring["E"].fail("aucune ligne horizontale")
     if not horizontals or len(verticals) < 2:
         reason = (f"figure non reconnue : {len(horizontals)} ligne(s) horizontale(s), "
                   f"{len(verticals)} verticale(s) (il en faut 1 et 2)")
-        not_recognized(checks, ("G", "C", "D", "F"), reason, notes)
-        return result()
+        scoring.not_recognized(("G", "C", "D", "F"), reason)
+        return scoring.result()
 
     horizontal = horizontals[0]
     v_left, v_right = sorted(verticals[:2], key=lambda l: l.center[0])
     crossings = [intersection(horizontal, v) for v in (v_left, v_right)]
     if any(p is None for p in crossings):
-        not_recognized(checks, ("G", "C", "D", "F"), "lignes parallèles : pas d'intersection",
-                       notes)
-        return result()
+        scoring.not_recognized(("G", "C", "D", "F"), "lignes parallèles : pas d'intersection")
+        return scoring.result()
 
     crosses = all(outside(horizontal, p) <= CROSSING_TOLERANCE_MM
                   and outside(v, p) <= CROSSING_TOLERANCE_MM
@@ -88,59 +90,67 @@ def score(drawing: Drawing, item: int = 7) -> ItemResult:
     outer_ratio = max(seg_left, seg_right) / max(min(seg_left, seg_right), 1e-6)
     side = min(seg_left, seg_right)
     center_ratio = seg_center / max(side, 1e-6)
-    crossing_angles = [geo.angle_between(horizontal.direction, v.direction) for v in (v_left, v_right)]
+    crossing_angles = [geo.angle_between(horizontal.direction, v.direction)
+                       for v in (v_left, v_right)]
     three_lines = len(lines) == 3
     on_h = [horizontal.center + t * horizontal.direction
             for t in (horizontal.t0, t_cross[0], t_cross[1], horizontal.t1)]
     for (a, b), length in zip(zip(on_h, on_h[1:]), (seg_left, seg_center, seg_right)):
-        marks.append(mk.cote(a, b, fmt(length), side=(0.0, 1.0)))
+        scoring.marks.append(mk.cote(a, b, fmt(length), side=(0.0, 1.0)))
     for v, p, side in ((v_left, crossings[0], (-1.0, 0.0)), (v_right, crossings[1], (1.0, 0.0))):
         top, bottom = sorted(v.ends, key=lambda q: q[1])
         up, down = _above_below(v, p)
-        marks += [mk.cote(top, p, fmt(up), side=side), mk.cote(p, bottom, fmt(down), side=side)]
+        scoring.marks += [mk.cote(top, p, fmt(up), side=side),
+                          mk.cote(p, bottom, fmt(down), side=side)]
     for v, p, value in zip((v_left, v_right), crossings, crossing_angles):
         top = min(v.ends, key=lambda q: q[1])
-        marks.append(mk.angle(p, p + np.asarray(horizontal.direction) * 8, top, f"{value:.0f}°"))
-    measures.update({"horizontale_mm": horizontal.length, "segment_gauche_mm": seg_left,
-                     "segment_central_mm": seg_center, "segment_droit_mm": seg_right,
-                     "rapport_segments_verticaux": pair_ratio,
-                     "rapport_segments_exterieurs": outer_ratio})
+        scoring.marks.append(mk.angle(p, p + np.asarray(horizontal.direction) * 8, top,
+                                      f"{value:.0f}°"))
+    scoring.measures.update({"horizontale_mm": horizontal.length, "segment_gauche_mm": seg_left,
+                             "segment_central_mm": seg_center, "segment_droit_mm": seg_right,
+                             "rapport_segments_verticaux": pair_ratio,
+                             "rapport_segments_exterieurs": outer_ratio})
 
     def axis_checks(checks_: Checks) -> None:
         angle = horizontal.angle_to_horizontal()
-        checks_.limit(angle, f"horizontale à {angle:.0f}° de l'axe (≤ 20°)",
+        checks_.limit(angle, f"horizontale à {angle:.0f}° de l'axe (≤ {AXIS_DEG.text})",
                       high=AXIS_DEG, unit="deg")
         for name, v in (("gauche", v_left), ("droite", v_right)):
             checks_.limit(v.angle_to_vertical(),
-                          f"verticale {name} à {v.angle_to_vertical():.0f}° de l'axe (≤ 20°)",
+                          f"verticale {name} à {v.angle_to_vertical():.0f}° de l'axe "
+                          f"(≤ {AXIS_DEG.text})",
                           high=AXIS_DEG, unit="deg")
 
-    general = checks["G"]
+    general = scoring["G"]
     general.add(three_lines and crosses,
                 f"une seule horizontale coupe deux verticales ({len(lines)} ligne(s))")
     axis_checks(general)
     general.limit(outer_ratio, f"segments horizontaux extérieurs : rapport "
-                  f"{fmt_ratio(outer_ratio)} ≤ 2:1", high=GENERAL_MAX_RATIO, unit="ratio")
-    general.limit(pair_ratio, f"segments verticaux opposés : rapport {fmt_ratio(pair_ratio)} ≤ 2:1",
-                  high=GENERAL_MAX_RATIO, unit="ratio")
+                  f"{fmt_ratio(outer_ratio)} ≤ {GENERAL_MAX_RATIO.text}", high=GENERAL_MAX_RATIO,
+                  unit="ratio")
+    general.limit(pair_ratio, f"segments verticaux opposés : rapport {fmt_ratio(pair_ratio)} ≤ "
+                  f"{GENERAL_MAX_RATIO.text}", high=GENERAL_MAX_RATIO, unit="ratio")
 
-    checks["C"].add(crosses, "la figure forme un « H » (les lignes se coupent)")
-    axis_checks(checks["C"])
+    scoring["C"].add(crosses, "la figure forme un « H » (les lignes se coupent)")
+    axis_checks(scoring["C"])
     lo, hi = CROSSING_ANGLES
     for name, angle in zip(("gauche", "droite"), crossing_angles):
-        checks["C"].limit(angle, f"angles au croisement {name} : {angle:.0f}° (60° à 120°)",
-                          low=lo, high=hi, unit="deg")
+        scoring["C"].limit(angle, f"angles au croisement {name} : {angle:.0f}° "
+                           f"({lo.text} à {hi.text})",
+                           low=lo, high=hi, unit="deg")
 
-    checks["D"].limit(pair_ratio, f"segments verticaux opposés : rapport "
-                      f"{fmt_ratio(pair_ratio)} ≤ 1,2:1", high=GLOBAL_MAX_PAIR_RATIO, unit="ratio")
+    scoring["D"].limit(pair_ratio, f"segments verticaux opposés : rapport "
+                       f"{fmt_ratio(pair_ratio)} ≤ {GLOBAL_MAX_PAIR_RATIO.text}",
+                       high=GLOBAL_MAX_PAIR_RATIO, unit="ratio")
 
     extras = extra_elements(drawing, [horizontal, v_left, v_right])
-    checks["F"].add(not extras, "aucun autre élément" if not extras
-                    else f"{len(extras)} élément(s) en trop")
-    checks["F"].limit(seg_center, f"segment central {fmt(seg_center)} ≥ segments gauche "
-                      f"({fmt(seg_left)}) et droit ({fmt(seg_right)})",
-                      low=max(seg_left, seg_right))
-    checks["F"].limit(center_ratio, f"rapport segment central / latéraux "
-                      f"{fmt_ratio(center_ratio)} ≤ 2:1", high=LOCAL_MAX_RATIO, unit="ratio")
+    scoring["F"].add(not extras, "aucun autre élément" if not extras
+                     else f"{len(extras)} élément(s) en trop")
+    scoring["F"].limit(seg_center, f"segment central {fmt(seg_center)} ≥ segments gauche "
+                       f"({fmt(seg_left)}) et droit ({fmt(seg_right)})",
+                       low=max(seg_left, seg_right))
+    scoring["F"].limit(center_ratio, f"rapport segment central / latéraux "
+                       f"{fmt_ratio(center_ratio)} ≤ {LOCAL_MAX_RATIO.text}", high=LOCAL_MAX_RATIO,
+                       unit="ratio")
 
-    return result()
+    return scoring.result()

@@ -9,44 +9,45 @@ import numpy as np
 
 from .. import geometry as geo
 from ..strokes import Drawing
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import Checks, ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from . import marks as mk
 from .shapes import (check_direction_changes, check_lines, end_at, extra_elements,
                      intersection, review_notes)
 
-JUNCTION_MM = 2.0  # intervalle / dépassement toléré au point de convergence
-GENERAL_SLOPE = (45.0, 75.0)  # Général : angle de chaque ligne avec l'horizontale
-GENERAL_MAX_RATIO = 2.0
-STRAIGHT_BAND_MM = 4.0  # Motricité A
-MAX_DIRECTION_CHANGES = 3  # Motricité B
-GLOBAL_MAX_SLOPE = 75.0  # Global C
-APEX_RANGE = (40.0, 80.0)  # Global D : angle au sommet
-LOCAL_MAX_LENGTH_MM = 80.0  # Local F
-LOCAL_MAX_RATIO = 1.3  # Local F
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+JUNCTION_MM = threshold(2.0, "GAE", "intervalle ou dépassement au sommet, au plus")
+GENERAL_SLOPE = (threshold(45.0, "G", "angle de chaque ligne avec l'horizontale, au moins", "deg"),
+                 threshold(75.0, "G", "angle de chaque ligne avec l'horizontale, au plus", "deg"))
+GENERAL_MAX_RATIO = threshold(2.0, "G", "rapport de la plus longue à la plus courte ligne, au "
+                              "plus", "ratio")
+STRAIGHT_BAND_MM = threshold(4.0, "A", "largeur de la barre grisée où tient chaque ligne")
+MAX_DIRECTION_CHANGES = threshold(3, "B", "changements de direction par ligne, au plus", "nombre")
+GLOBAL_MAX_SLOPE = threshold(75.0, "C", "angle de chaque ligne avec l'horizontale, au plus", "deg")
+APEX_RANGE = (threshold(40.0, "D", "angle au sommet, au moins", "deg"),
+              threshold(80.0, "D", "angle au sommet, au plus", "deg"))
+LOCAL_MAX_LENGTH_MM = threshold(80.0, "F", "longueur de chaque ligne, au plus")
+LOCAL_MAX_RATIO = threshold(1.3, "F", "rapport de la plus longue à la plus courte ligne, au plus",
+                            "ratio")
 
 
 def score(drawing: Drawing, item: int = 6) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
+        return scoring.empty()
     lines = drawing.significant_lines()
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {"nombre_lignes": len(lines)}
-    notes = review_notes(lines)
-    check_lines(checks["A"], lines, STRAIGHT_BAND_MM)
-    check_direction_changes(checks["B"], lines, MAX_DIRECTION_CHANGES)
+    scoring.measures["nombre_lignes"] = len(lines)
+    scoring.notes += review_notes(lines)
+    check_lines(scoring["A"], lines, STRAIGHT_BAND_MM)
+    check_direction_changes(scoring["B"], lines, MAX_DIRECTION_CHANGES)
 
-    marks: list = [mk.bande(line) for line in lines]
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+    scoring.marks += [mk.bande(line) for line in lines]
 
     apex = intersection(lines[0], lines[1]) if len(lines) >= 2 else None
     if apex is None:
         reason = "il faut deux lignes qui convergent"
-        not_recognized(checks, ("G", "A", "C", "D", "E", "F"), reason, notes)
-        return result()
+        scoring.not_recognized(("G", "A", "C", "D", "E", "F"), reason)
+        return scoring.result()
 
     left, right = sorted(lines[:2], key=lambda l: l.center[0])
     ends = [end_at(line, apex) for line in (left, right)]
@@ -59,52 +60,57 @@ def score(drawing: Drawing, item: int = 6) -> ItemResult:
     lengths = [left.length, right.length]
     ratio = max(lengths) / max(min(lengths), 1e-6)
     two_lines = len(lines) == 2
-    marks += [mk.line_length(left), mk.line_length(right),
-              mk.angle(apex, far[0], far[1], f"{apex_angle:.0f}°")]
+    scoring.marks += [mk.line_length(left), mk.line_length(right),
+                      mk.angle(apex, far[0], far[1], f"{apex_angle:.0f}°")]
     for end, slope in zip(far, slopes):
         toward_apex = np.array([np.sign(apex[0] - end[0]) or 1.0, 0.0])
-        marks.append(mk.angle(end, end + toward_apex * 12, apex, f"{slope:.0f}° / horizontale"))
+        scoring.marks.append(mk.angle(end, end + toward_apex * 12, apex,
+                                      f"{slope:.0f}° / horizontale"))
     if gap >= 0.5 or overshoot >= 0.5:
-        marks.append(mk.point(apex, f"intervalle {fmt(gap)}, dépassement {fmt(overshoot)}"))
-    measures.update({"ligne_gauche_mm": left.length, "ligne_droite_mm": right.length,
-                     "intervalle_mm": gap, "depassement_mm": overshoot,
-                     "angle_sommet_deg": apex_angle, "pente_gauche_deg": slopes[0],
-                     "pente_droite_deg": slopes[1], "rapport_longueurs": ratio})
+        scoring.marks.append(mk.point(apex, f"intervalle {fmt(gap)}, dépassement {fmt(overshoot)}"))
+    scoring.measures.update({"ligne_gauche_mm": left.length, "ligne_droite_mm": right.length,
+                             "intervalle_mm": gap, "depassement_mm": overshoot,
+                             "angle_sommet_deg": apex_angle, "pente_gauche_deg": slopes[0],
+                             "pente_droite_deg": slopes[1], "rapport_longueurs": ratio})
 
     def junction_checks(checks_: Checks) -> None:
-        checks_.limit(gap, f"intervalle au sommet {fmt(gap)} ≤ 2 mm", high=JUNCTION_MM)
-        checks_.limit(overshoot, f"dépassement au sommet {fmt(overshoot)} ≤ 2 mm", high=JUNCTION_MM)
+        checks_.limit(gap, f"intervalle au sommet {fmt(gap)} ≤ {JUNCTION_MM.text}",
+                      high=JUNCTION_MM)
+        checks_.limit(overshoot, f"dépassement au sommet {fmt(overshoot)} ≤ {JUNCTION_MM.text}",
+                      high=JUNCTION_MM)
 
     lo, hi = GENERAL_SLOPE
-    general = checks["G"]
+    general = scoring["G"]
     general.add(two_lines, f"seulement deux lignes convergent ({len(lines)} trouvée(s))")
     junction_checks(general)
     for name, slope in zip(("gauche", "droite"), slopes):
-        general.limit(slope, f"ligne {name} à {slope:.0f}° de l'horizontale (45° à 75°)",
+        general.limit(slope, f"ligne {name} à {slope:.0f}° de l'horizontale "
+                      f"({lo.text} à {hi.text})",
                       low=lo, high=hi, unit="deg")
-    general.limit(ratio, f"rapport des longueurs {fmt_ratio(ratio)} ≤ 2:1",
+    general.limit(ratio, f"rapport des longueurs {fmt_ratio(ratio)} ≤ {GENERAL_MAX_RATIO.text}",
                   high=GENERAL_MAX_RATIO, unit="ratio")
 
-    junction_checks(checks["A"])
+    junction_checks(scoring["A"])
 
-    checks["C"].add(opens_upward, "la figure forme un « V » (sommet en bas)")
+    scoring["C"].add(opens_upward, "la figure forme un « V » (sommet en bas)")
     for name, slope in zip(("gauche", "droite"), slopes):
-        checks["C"].limit(slope, f"ligne {name} à {slope:.0f}° de l'horizontale (≤ 75°)",
-                          high=GLOBAL_MAX_SLOPE, unit="deg")
+        scoring["C"].limit(slope, f"ligne {name} à {slope:.0f}° de l'horizontale "
+                           f"(≤ {GLOBAL_MAX_SLOPE.text})",
+                           high=GLOBAL_MAX_SLOPE, unit="deg")
 
     lo, hi = APEX_RANGE
-    checks["D"].limit(apex_angle, f"angle au sommet {apex_angle:.0f}° (entre 40° et 80°)",
-                      low=lo, high=hi, unit="deg")
+    scoring["D"].limit(apex_angle, f"angle au sommet {apex_angle:.0f}° (entre {lo.text} et {hi.text})",
+                       low=lo, high=hi, unit="deg")
 
-    checks["E"].add(two_lines, f"seulement deux lignes ({len(lines)} trouvée(s))")
-    checks["E"].limit(gap, f"les deux lignes convergent (intervalle {fmt(gap)})", high=JUNCTION_MM)
+    scoring["E"].add(two_lines, f"seulement deux lignes ({len(lines)} trouvée(s))")
+    scoring["E"].limit(gap, f"les deux lignes convergent (intervalle {fmt(gap)})", high=JUNCTION_MM)
 
     extras = extra_elements(drawing, [left, right])
-    checks["F"].add(not extras, "aucun autre élément" if not extras
-                    else f"{len(extras)} élément(s) en trop")
-    checks["F"].limit(max(lengths), f"longueur des lignes {fmt(max(lengths))} ≤ 80 mm",
-                      high=LOCAL_MAX_LENGTH_MM)
-    checks["F"].limit(ratio, f"rapport des longueurs {fmt_ratio(ratio)} ≤ 1,3:1",
-                      high=LOCAL_MAX_RATIO, unit="ratio")
+    scoring["F"].add(not extras, "aucun autre élément" if not extras
+                     else f"{len(extras)} élément(s) en trop")
+    scoring["F"].limit(max(lengths), f"longueur des lignes {fmt(max(lengths))} ≤ "
+                       f"{LOCAL_MAX_LENGTH_MM.text}", high=LOCAL_MAX_LENGTH_MM)
+    scoring["F"].limit(ratio, f"rapport des longueurs {fmt_ratio(ratio)} ≤ {LOCAL_MAX_RATIO.text}",
+                       high=LOCAL_MAX_RATIO, unit="ratio")
 
-    return result()
+    return scoring.result()

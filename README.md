@@ -164,6 +164,20 @@ Pour ne pas régler l'outil sur ses propres données de validation :
 - garder un dossier de réglage et un dossier de validation séparés ;
 - ne lancer la validation qu'une fois la version figée.
 
+### Lister les seuils du manuel
+
+```bash
+autocorrect-nepsy seuils
+autocorrect-nepsy seuils --item 4
+```
+
+Affiche, item par item, chaque seuil chiffré du manuel utilisé par l'outil :
+critère(s) concerné(s), valeur et description reformulée (jamais recopiée).
+Exemple : `F  1,3:1  rapport du plus long au plus court côté, au plus`. Cette
+liste est à vérifier sur le manuel. Les autres constantes du code sont des
+réglages internes de l'outil (reconnaissance des figures, tolérances de
+mesure) ; elles ne figurent pas dans la liste.
+
 ## Fonctionnement
 
 1. **Scan** (`scan.py`) : lecture du PDF ou de l'image et de sa résolution,
@@ -180,7 +194,13 @@ Pour ne pas régler l'outil sur ses propres données de validation :
 5. **Critères** (`criteria/`) : un module par item, qui applique les seuils du
    manuel (reformulés) aux mesures. Des modules communs retrouvent les lignes
    courbes (`curves.py`), les régions fermées et les polygones (`polygons.py`)
-   et les ellipses (`ellipses.py`).
+   et les ellipses (`ellipses.py`). Dans chaque module, les seuils du manuel
+   sont déclarés à part, avec leur critère (`threshold(…)`, voir `base.py`),
+   avant les réglages internes de l'outil ; les textes du rapport citent ces
+   constantes. L'échafaudage commun `Scoring` (`base.py`) réunit les
+   vérifications de chaque critère, les mesures, les notes « à vérifier » et
+   traite de la même façon, pour tous les items, le dessin vide et la figure
+   non reconnue.
 6. **Rapport** (`report.py`, `compare.py`) : CSV, HTML et comparaison avec la
    cotation de référence.
 7. **Interface** (`gui.py`) : fenêtre Tkinter ; `packaging/` contient de quoi
@@ -231,6 +251,12 @@ pytest
 Les tests de l'interface ont besoin de `tkinter` et d'un écran (sous Linux sans
 écran : `xvfb-run -a pytest`) ; sans eux, ils sont ignorés. En intégration
 continue, `AUTOCORRECT_TESTS_INTERFACE=obligatoires` les rend obligatoires.
+
+`tests/test_instantane.py` compare la cotation de chaque item, sur les copies
+synthétiques de tous les modèles, à un instantané (`tests/instantane_cotation.json`).
+Une restructuration du code ne doit rien y changer. Après un changement voulu
+de la cotation, vérifier les différences affichées puis régénérer
+l'instantané : `python tests/test_instantane.py`.
 
 ### Construire l'exécutable
 

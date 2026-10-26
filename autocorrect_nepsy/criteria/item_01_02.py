@@ -9,24 +9,31 @@ import numpy as np
 
 from .. import geometry as geo
 from ..strokes import Drawing, StraightLine
-from .base import Checks, ItemResult, empty_result, fmt
+from .base import ItemResult, Scoring, fmt, manual_thresholds
 from . import marks as mk
 
-GENERAL_MIN_MM = 7.0  # trace d'au moins 7 mm
-GENERAL_CONE = 30.0  # plus de la moitié du trait à moins de 30° de l'axe
-MOTOR_MIN_MM = 10.0  # Motricité A : au moins 1 cm
-STRAIGHT_BAND_MM = 5.0  # Motricité B : tient dans la barre grisée de 5 mm
-GLOBAL_CONE = 45.0  # Global C : tout le trait à moins de 45° de l'axe
-GLOBAL_MIN_MM = 20.0  # Global D : au moins 2 cm
-ITEM2_MAX_MM = 70.0  # Global D (item 2) : au plus 7 cm
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+GENERAL_MIN_MM = threshold(7.0, "G", "longueur du trait, au moins")
+GENERAL_CONE = threshold(30.0, "G", "écart à l'axe de la plus grande part du trait, au plus",
+                         "deg")
+GENERAL_MIN_PART = threshold(0.5, "G", "part du trait dans cet écart à l'axe, au moins", "part")
+MOTOR_MIN_MM = threshold(10.0, "A", "longueur du trait, au moins")
+STRAIGHT_BAND_MM = threshold(5.0, "B", "largeur de la barre grisée où tient le trait")
+GLOBAL_CONE = threshold(45.0, "C", "écart à l'axe de tout le trait, au plus", "deg")
+GLOBAL_MIN_MM = threshold(20.0, "D", "longueur du trait, au moins")
+ITEM2_MAX_MM = threshold(70.0, "D", "longueur du trait horizontal (item 2), au plus")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 # Près du sommet de l'angle, la direction d'un point n'est pas fiable.
 APEX_IGNORE_MM = 3.0
 
 
 def score(drawing: Drawing, item: int) -> ItemResult:
+    scoring = Scoring(item, "GABCD")
     if drawing.is_empty or not drawing.lines:
-        return empty_result(item, ("G", "A", "B", "C", "D"), "aucun tracé dans la zone")
+        return scoring.empty()
     line, notes = _trace(drawing)
+    scoring.notes.extend(notes)
     if item == 1:
         axis, name, deviation = np.array([0.0, 1.0]), "la verticale", line.angle_to_vertical()
     else:
@@ -35,37 +42,30 @@ def score(drawing: Drawing, item: int) -> ItemResult:
     widest = min(geo.max_cone_angle(line.points, end, axis, APEX_IGNORE_MM) for end in line.ends)
     length = line.length
 
-    general = Checks()
-    general.limit(length, f"longueur {fmt(length)} ≥ 7 mm", low=GENERAL_MIN_MM)
-    general.limit(in_cone_30, f"{in_cone_30:.0%} du trait à moins de 30° de {name} "
-                  "(plus de la moitié exigée)", low=0.5, unit="part")
+    scoring["G"].limit(length, f"longueur {fmt(length)} ≥ {GENERAL_MIN_MM.text}",
+                       low=GENERAL_MIN_MM)
+    scoring["G"].limit(in_cone_30, f"{in_cone_30:.0%} du trait à moins de {GENERAL_CONE.text} "
+                       f"de {name} (plus de la moitié exigée)", low=GENERAL_MIN_PART, unit="part")
 
-    motor_a = Checks().limit(length, f"longueur {fmt(length)} ≥ 10 mm", low=MOTOR_MIN_MM)
-    motor_b = Checks().limit(line.width, f"trait droit : tient dans une bande de "
-                             f"{fmt(line.width)} (≤ 5 mm)", high=STRAIGHT_BAND_MM)
+    scoring["A"].limit(length, f"longueur {fmt(length)} ≥ {MOTOR_MIN_MM.text}", low=MOTOR_MIN_MM)
+    scoring["B"].limit(line.width, f"trait droit : tient dans une bande de {fmt(line.width)} "
+                       f"(≤ {STRAIGHT_BAND_MM.text})", high=STRAIGHT_BAND_MM)
 
-    global_c = Checks().limit(widest, f"tout le trait à moins de 45° de {name} (écart "
-                              f"maximal {widest:.0f}°)", high=GLOBAL_CONE, unit="deg")
-    global_d = Checks().limit(length, f"longueur {fmt(length)} ≥ 20 mm", low=GLOBAL_MIN_MM)
+    scoring["C"].limit(widest, f"tout le trait à moins de {GLOBAL_CONE.text} de {name} (écart "
+                       f"maximal {widest:.0f}°)", high=GLOBAL_CONE, unit="deg")
+    scoring["D"].limit(length, f"longueur {fmt(length)} ≥ {GLOBAL_MIN_MM.text}", low=GLOBAL_MIN_MM)
     if item == 2:
-        global_d.limit(length, f"longueur {fmt(length)} ≤ 70 mm", high=ITEM2_MAX_MM)
+        scoring["D"].limit(length, f"longueur {fmt(length)} ≤ {ITEM2_MAX_MM.text}",
+                           high=ITEM2_MAX_MM)
 
     # Écart à l'axe mesuré depuis l'extrémité haute (item 1) ou gauche (item 2).
     start, end = sorted(line.ends, key=lambda p: p[1] if item == 1 else p[0])
-    marks = [mk.line_length(line), mk.bande(line),
-             mk.angle(start, start + axis * min(15.0, length), end,
-                      f"{deviation:.0f}° / {'verticale' if item == 1 else 'horizontale'}")]
-
-    return ItemResult(
-        item,
-        {"G": general.criterion("G"), "A": motor_a.criterion("A"),
-         "B": motor_b.criterion("B"), "C": global_c.criterion("C"),
-         "D": global_d.criterion("D")},
-        measures={"longueur_mm": length, "ecart_axe_deg": deviation,
-                  "largeur_bande_mm": line.width},
-        notes=notes,
-        marks=marks,
-    )
+    scoring.marks += [mk.line_length(line), mk.bande(line),
+                      mk.angle(start, start + axis * min(15.0, length), end,
+                               f"{deviation:.0f}° / {'verticale' if item == 1 else 'horizontale'}")]
+    scoring.measures.update(longueur_mm=length, ecart_axe_deg=deviation,
+                            largeur_bande_mm=line.width)
+    return scoring.result()
 
 
 def _trace(drawing: Drawing) -> tuple[StraightLine, list[str]]:

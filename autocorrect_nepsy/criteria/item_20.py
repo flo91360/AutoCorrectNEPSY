@@ -22,32 +22,40 @@ from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
 from . import polygons
-from .base import Checks, ItemResult, empty_result, fmt, not_recognized, unrecognized_note
+from .base import ItemResult, Scoring, fmt, fmt_limit, manual_thresholds, unrecognized_note
 from .curves import extrema
 from .shapes import separate_extras
 
-PETALS = 6
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+PETALS = threshold(6, "GCF", "nombre de pétales, exactement", "nombre")
+CONVERGE_LOOSE_MM = threshold(5.0, "G", "écart entre les extrémités intérieures des pétales, "
+                              "au plus")
+CONVERGE_MM = threshold(2.0, "D", "écart entre les extrémités intérieures des pétales, au plus")
+TIP_JOIN_MM = threshold(1.0, "B", "intervalle ou dépassement à la pointe d'un pétale, au plus")
+VERTICAL_MAX_DEG = threshold(5.0, "D", "écart de l'axe des deux pétales verticaux à la verticale, "
+                             "au plus", "deg")
+SIDE_MIN_DEG = threshold(20.0, "D", "angle des quatre autres pétales avec l'horizontale, au moins",
+                         "deg")
+SIDE_MAX_DEG = threshold(45.0, "D", "angle des quatre autres pétales avec l'horizontale, au plus",
+                         "deg")
+MAX_WIDTH_MM = threshold(11.0, "E", "largeur de chaque pétale, au plus")
+MIN_LENGTH_MM = threshold(27.0, "E", "longueur de chaque pétale, au moins")
+MAX_LENGTH_MM = threshold(33.0, "F", "longueur de chaque pétale, au plus")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 BIN_DEG = 2.0  # pas angulaire du contour extérieur
 TIP_PROMINENCE_MM = 6.0  # une pointe dépasse d'autant les creux qui l'entourent
 TIP_REGION_MM = 5.0  # la région d'un pétale s'arrête avant la fine pointe d'encre
 MIN_PETAL_MM2 = 40.0  # région assez grande pour être un pétale
-CONVERGE_LOOSE_MM = 5.0  # Général : extrémités intérieures les unes des autres
-CONVERGE_MM = 2.0  # Global D
 # Une région s'arrête un peu avant la rencontre de ses deux bords (épaisseur du
 # trait redessiné, coin aigu) : écart retiré à l'étalement des extrémités.
 INNER_SHORTFALL_MM = 0.5
-TIP_JOIN_MM = 1.0  # Motricité B : intervalle ou dépassement à la pointe
 TIP_GAP_REACH_MM = 3.0  # interruption recousue près de la pointe
 OVERSHOOT_REACH_MM = 4.0
 BEYOND_MM = 0.5  # encre au-delà de la pointe de la région
 TIP_ARC_MM = 3.0  # angle de la pointe, entre les bords à 3 mm de part et d'autre
 POINTED_MAX_DEG = 90.0
 VERTICAL_LOOSE_DEG = 20.0  # Général : axe « relativement » vertical
-VERTICAL_MAX_DEG = 5.0  # Global D
-SIDE_MIN_DEG, SIDE_MAX_DEG = 20.0, 45.0  # Global D : les quatre autres pointes
-MAX_WIDTH_MM = 11.0  # Local E
-MIN_LENGTH_MM = 27.0  # Local E
-MAX_LENGTH_MM = 33.0  # Local F
 WAVE_MM = 1.0  # crête ou creux d'un bord (écart à sa corde)
 CORNER_DEG = 75.0  # Motricité A : angle marqué le long d'un bord
 CORNER_ARC_MM = 1.5
@@ -90,32 +98,24 @@ class Petal:
 
 
 def score(drawing: Drawing, item: int = 20) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {}
-    marks: list = []
-    notes: list[str] = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+        return scoring.empty()
 
     outlines = polygons.regions(drawing, opened=False)
     center = _center(drawing, outlines)
     tips = _tips(drawing, center)
     if len(tips) < 2:
-        not_recognized(checks, codes, "fleur non reconnue (pétales qui partent d'un centre)",
-                       notes)
-        return result()
+        scoring.not_recognized(scoring.codes,
+                               "fleur non reconnue (pétales qui partent d'un centre)")
+        return scoring.result()
     petals = _petals(tips, outlines, center)
     count = len(petals)
-    measures["pétales"] = float(count)
+    scoring.measures["pétales"] = float(count)
     if count != PETALS:
         # Pétales fondus ou manqués, ou gribouillis pris pour une fleur : le
         # nombre lu n'est pas sûr.
-        notes.append(unrecognized_note(f"{count} pétale(s) lu(s) au lieu de 6"))
+        scoring.notes.append(unrecognized_note(f"{count} pétale(s) lu(s) au lieu de {PETALS.text}"))
 
     lengths, widths, angles, tip_angles = [], [], [], []
     for k, petal in enumerate(petals):
@@ -127,18 +127,18 @@ def score(drawing: Drawing, item: int = 20) -> ItemResult:
         tip_angles.append(_tip_angle(petal))
         if petal.outline is not None:
             trace = np.roll(petal.outline, -petal.apex, axis=0) if petal.closed else petal.outline
-            marks.append(mk.trace(trace, f"{fmt(lengths[-1], '')} × {fmt(widths[-1])}", k))
+            scoring.marks.append(mk.trace(trace, f"{fmt(lengths[-1], '')} × {fmt(widths[-1])}", k))
         normal = np.array([-rel[1], rel[0]])
-        marks.append(mk.segment(center, petal.point, f"{_from_horizontal(angles[-1]):.0f}°",
-                                side=normal))
+        scoring.marks.append(mk.segment(center, petal.point,
+                                        f"{_from_horizontal(angles[-1]):.0f}°", side=normal))
     inner_ends = [p.inner_end for p in petals if p.outline is not None]
     spread = _spread(inner_ends)
     if inner_ends:
-        marks.append(mk.cercle(np.mean(inner_ends, axis=0), max(spread / 2, 0.5),
-                               f"extrémités intérieures {fmt(spread)}"))
+        scoring.marks.append(mk.cercle(np.mean(inner_ends, axis=0), max(spread / 2, 0.5),
+                                       f"extrémités intérieures {fmt(spread)}"))
     open_petals = sum(p.outline is None for p in petals)
-    measures.update({"longueur_min_mm": min(lengths), "longueur_max_mm": max(lengths),
-                     "largeur_max_mm": max(widths), "convergence_mm": spread})
+    scoring.measures.update({"longueur_min_mm": min(lengths), "longueur_max_mm": max(lengths),
+                             "largeur_max_mm": max(widths), "convergence_mm": spread})
 
     # Formes des bords : un « S » (une crête, un creux), pas d'angle marqué.
     waves, corners = [], []
@@ -151,79 +151,83 @@ def score(drawing: Drawing, item: int = 20) -> ItemResult:
     not_s = sum(not 1 <= w <= 2 for w in waves)
     sharp = max(corners, default=0.0)
     blunt = [k + 1 for k, a in enumerate(tip_angles) if a > POINTED_MAX_DEG]
-    measures.update({"angle_bord_max_deg": sharp,
-                     "angle_pointe_max_deg": max(tip_angles)})
+    scoring.measures.update({"angle_bord_max_deg": sharp,
+                             "angle_pointe_max_deg": max(tip_angles)})
     above = sum(p.point[1] < center[1] for p in petals)
     top, bottom = _vertical_pair(angles)
     vertical = _axis_tilt(petals[top].point, petals[bottom].point) if top != bottom else 90.0
     others = [k for k in range(count) if k not in (top, bottom)]
-    measures["axe_vertical_deg"] = vertical
+    scoring.measures["axe_vertical_deg"] = vertical
 
-    general = checks["G"]
+    corner_text = (f"angle le plus marqué le long des bords {sharp:.0f}° ≤ "
+                   f"{fmt_limit(CORNER_DEG, 'deg')}")
+    general = scoring["G"]
     general.add(count == PETALS, f"{count} pétale(s) (six attendus)")
     general.add(not open_petals, "pétales fermés" if not open_petals
                 else f"{open_petals} pétale(s) non fermé(s)")
     general.add(not not_s, "bords en « S » (une crête, un creux)" if not not_s
                 else f"{not_s} bord(s) de pétale droit(s) ou ondulé(s)")
-    general.limit(sharp, f"angle le plus marqué le long des bords {sharp:.0f}° ≤ 75° "
-                  "(pas de distorsion)", high=CORNER_DEG, unit="deg")
+    general.limit(sharp, f"{corner_text} (pas de distorsion)", high=CORNER_DEG, unit="deg")
     general.add(not blunt, "extrémités pointues" if not blunt
                 else f"pointe(s) arrondie(s) : pétale(s) {', '.join(map(str, blunt))}")
     general.limit(vertical, f"deux pétales sur un axe à {vertical:.0f}° de la verticale "
                   "(relativement vertical)", high=VERTICAL_LOOSE_DEG, unit="deg")
     general.add(above == count - above == PETALS // 2,
                 f"{above} pointe(s) au-dessus de l'axe horizontal, {count - above} en dessous")
-    general.limit(spread, f"extrémités intérieures à {fmt(spread)} les unes des autres (≤ 5 mm)",
-                  high=CONVERGE_LOOSE_MM)
+    general.limit(spread, f"extrémités intérieures à {fmt(spread)} les unes des autres "
+                  f"(≤ {CONVERGE_LOOSE_MM.text})", high=CONVERGE_LOOSE_MM)
 
     if corners:
-        checks["A"].limit(sharp, f"angle le plus marqué le long des bords {sharp:.0f}° ≤ 75° "
-                          "(pas de distorsion majeure)", high=CORNER_DEG, unit="deg")
+        scoring["A"].limit(sharp, f"{corner_text} (pas de distorsion majeure)", high=CORNER_DEG,
+                           unit="deg")
     else:
-        checks["A"].fail("bords des pétales non mesurables (aucun pétale fermé)")
+        scoring["A"].fail("bords des pétales non mesurables (aucun pétale fermé)")
 
     raster = polygons.raster(drawing)
     tip_gaps = [_tip_gap(drawing, raster, p) for p in petals]
     worst = max(tip_gaps)
-    measures["pointe_intervalle_max_mm"] = worst
+    scoring.measures["pointe_intervalle_max_mm"] = worst
     if open_petals:
-        checks["B"].fail(f"{open_petals} pétale(s) ouvert(s) de plus de 3 mm")
+        scoring["B"].fail(f"{open_petals} pétale(s) ouvert(s) de plus de 3 mm")
     else:
-        checks["B"].limit(worst, f"plus grand intervalle ou dépassement aux pointes {fmt(worst)} "
-                          "≤ 1 mm", high=TIP_JOIN_MM)
+        scoring["B"].limit(worst, f"plus grand intervalle ou dépassement aux pointes {fmt(worst)} "
+                           f"≤ {TIP_JOIN_MM.text}", high=TIP_JOIN_MM)
 
-    checks["C"].add(count == PETALS, f"fleur à {count} pétale(s) (six attendus)")
-    checks["C"].add(above == count - above, f"{above} pointe(s) au-dessus de l'axe horizontal, "
-                    f"{count - above} en dessous")
+    scoring["C"].add(count == PETALS, f"fleur à {count} pétale(s) (six attendus)")
+    scoring["C"].add(above == count - above, f"{above} pointe(s) au-dessus de l'axe horizontal, "
+                     f"{count - above} en dessous")
 
-    checks["D"].add(not blunt, "extrémités pointues" if not blunt
-                    else f"pointe(s) arrondie(s) : pétale(s) {', '.join(map(str, blunt))}")
-    checks["D"].limit(spread, f"extrémités intérieures à {fmt(spread)} les unes des autres "
-                      "(≤ 2 mm)", high=CONVERGE_MM)
-    checks["D"].limit(vertical, f"axe des deux pétales verticaux à {vertical:.0f}° de la "
-                      "verticale (≤ 5°)", high=VERTICAL_MAX_DEG, unit="deg")
+    scoring["D"].add(not blunt, "extrémités pointues" if not blunt
+                     else f"pointe(s) arrondie(s) : pétale(s) {', '.join(map(str, blunt))}")
+    scoring["D"].limit(spread, f"extrémités intérieures à {fmt(spread)} les unes des autres "
+                       f"(≤ {CONVERGE_MM.text})", high=CONVERGE_MM)
+    scoring["D"].limit(vertical, f"axe des deux pétales verticaux à {vertical:.0f}° de la "
+                       f"verticale (≤ {VERTICAL_MAX_DEG.text})", high=VERTICAL_MAX_DEG, unit="deg")
     for k in others:
         tilt = _from_horizontal(angles[k])
-        checks["D"].add(SIDE_MIN_DEG <= tilt <= SIDE_MAX_DEG,
-                        f"pétale {k + 1} à {tilt:.0f}° de l'horizontale (20° à 45°)",
-                        near=min(abs(tilt - SIDE_MIN_DEG), abs(tilt - SIDE_MAX_DEG)) <= 2.0)
+        scoring["D"].add(SIDE_MIN_DEG <= tilt <= SIDE_MAX_DEG,
+                         f"pétale {k + 1} à {tilt:.0f}° de l'horizontale "
+                         f"({SIDE_MIN_DEG.text} à {SIDE_MAX_DEG.text})",
+                         near=min(abs(tilt - SIDE_MIN_DEG), abs(tilt - SIDE_MAX_DEG)) <= 2.0)
 
     for k, (length, width) in enumerate(zip(lengths, widths)):
-        checks["E"].limit(width, f"pétale {k + 1} : largeur {fmt(width)} ≤ 11 mm",
-                          high=MAX_WIDTH_MM)
-        checks["E"].limit(length, f"pétale {k + 1} : longueur {fmt(length)} ≥ 27 mm",
-                          low=MIN_LENGTH_MM)
+        scoring["E"].limit(width, f"pétale {k + 1} : largeur {fmt(width)} ≤ {MAX_WIDTH_MM.text}",
+                           high=MAX_WIDTH_MM)
+        scoring["E"].limit(length, f"pétale {k + 1} : longueur {fmt(length)} ≥ "
+                           f"{MIN_LENGTH_MM.text}",
+                           low=MIN_LENGTH_MM)
 
     figure = np.vstack([p.outline for p in petals if p.outline is not None]
                        + [np.array([p.tip for p in petals])])
     extras = len(separate_extras(drawing, figure, distance=TIP_REGION_MM))
     added = max(count - PETALS, 0)
-    checks["F"].add(added == 0 and extras == 0, "aucun autre élément" if not (added or extras)
-                    else f"{added} pétale(s) ajouté(s), {extras} autre(s) élément(s)")
+    scoring["F"].add(added == 0 and extras == 0, "aucun autre élément" if not (added or extras)
+                     else f"{added} pétale(s) ajouté(s), {extras} autre(s) élément(s)")
     for k, length in enumerate(lengths):
-        checks["F"].limit(length, f"pétale {k + 1} : longueur {fmt(length)} ≤ 33 mm",
-                          high=MAX_LENGTH_MM)
-    return result()
+        scoring["F"].limit(length, f"pétale {k + 1} : longueur {fmt(length)} ≤ "
+                           f"{MAX_LENGTH_MM.text}",
+                           high=MAX_LENGTH_MM)
+    return scoring.result()
 
 
 def _center(drawing: Drawing, outlines: list[np.ndarray]) -> np.ndarray:

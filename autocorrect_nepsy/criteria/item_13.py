@@ -13,46 +13,53 @@ import numpy as np
 from .. import geometry as geo
 from ..strokes import Drawing, StraightLine
 from . import marks as mk
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, not_recognized
+from .base import Checks, ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .shapes import check_lines, extra_elements, intersection, review_notes
 
-STRAIGHT_BAND_MM = 2.0  # Motricité A : barre grisée de 2 mm
-JOIN_MM = 2.0  # Motricité B : intervalle ou dépassement à la ligne de base
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+STRAIGHT_BAND_MM = threshold(2.0, "A", "largeur de la barre grisée où tient chaque ligne")
+JOIN_MM = threshold(2.0, "B", "intervalle ou dépassement entre une ligne radiale et la base, "
+                    "au plus")
+PER_SIDE = threshold(3, "GC", "lignes radiales de chaque côté de la ligne centrale, exactement",
+                     "nombre")
+GENERAL_BASE_DEG = threshold(20.0, "G", "écart de la base à l'horizontale, au plus", "deg")
+CONVERGENCE_THIRD = (threshold(1 / 3, "GD", "position du point de convergence sur la base, au "
+                               "moins (tiers central)", "part"),
+                     threshold(2 / 3, "GD", "position du point de convergence sur la base, au "
+                               "plus (tiers central)", "part"))
+GENERAL_SPREAD_MM = threshold(5.0, "G", "écart sur la base entre les lignes radiales d'un même "
+                              "côté, au plus")
+GLOBAL_BASE_DEG = threshold(10.0, "D", "écart de la base à l'horizontale, au plus", "deg")
+GLOBAL_CLUSTER_MM = threshold(3.0, "D", "écart sur la base entre lignes qui convergent au même "
+                              "point, au plus")
+GLOBAL_MIN_CONVERGING = threshold(5, "D", "lignes radiales qui convergent au même point, au moins",
+                                  "nombre")
+LOCAL_MAX_RADIAL_RATIO = threshold(1.2, "E", "rapport de la plus longue à la plus courte ligne "
+                                   "radiale, au plus", "ratio")
+LOCAL_MIN_BASE_MM = threshold(40.0, "F", "longueur de la base, au moins")
+LOCAL_MIN_RADIAL_MM = threshold(15.0, "F", "longueur de la plus courte ligne radiale, au moins")
+# Réglages de l'outil (reconnaissance des figures, tolérances de mesure).
 BASE_MAX_DEG = 30.0  # au-delà, ce n'est plus la ligne de base
 RADIAL_MIN_DEG = 10.0  # une ligne radiale s'élève au-dessus de la base
 RADIAL_NEAR_MM = 8.0  # bas d'une ligne radiale près de la ligne de base
 CENTRAL_MAX_DEG = 25.0  # ligne centrale « relativement verticale »
-PER_SIDE = 3
 CONVERGENCE_ZONE_MM = 3.0  # tache d'encre au point de convergence, ignorée
-GENERAL_BASE_DEG = 20.0
-GENERAL_SPREAD_MM = 5.0  # de chaque côté, lignes radiales proches à la base
 DOUBLED_MAX_MM = 3.0  # base repassée : ce n'est plus un seul trait
-GLOBAL_BASE_DEG = 10.0  # Global D
-GLOBAL_CLUSTER_MM = 3.0  # Global D : lignes qui convergent au même point…
-GLOBAL_MIN_CONVERGING = 5  # … au moins cinq
-LOCAL_MAX_RADIAL_RATIO = 1.2  # Local E
-LOCAL_MIN_BASE_MM = 40.0  # Local F
-LOCAL_MIN_RADIAL_MM = 15.0  # Local F
 
 
 def score(drawing: Drawing, item: int = 13) -> ItemResult:
-    codes = ("G", "A", "B", "C", "D", "E", "F")
+    scoring = Scoring(item, "GABCDEF")
     if drawing.is_empty:
-        return empty_result(item, codes, "aucun tracé dans la zone")
+        return scoring.empty()
     lines = drawing.significant_lines()
-    checks = {code: Checks() for code in codes}
-    measures: dict[str, float] = {"nombre_lignes": len(lines)}
-    notes = review_notes(lines)
-    marks: list = []
-
-    def result() -> ItemResult:
-        return ItemResult(item, {c: checks[c].criterion(c) for c in codes}, measures, notes,
-                          marks)
+    scoring.measures["nombre_lignes"] = len(lines)
+    scoring.notes += review_notes(lines)
 
     def fail(reason: str) -> ItemResult:
-        _check_straight(checks["A"], marks, lines, None)
-        not_recognized(checks, ("G", "B", "C", "D", "E", "F"), reason, notes)
-        return result()
+        _check_straight(scoring["A"], scoring.marks, lines, None)
+        scoring.not_recognized(("G", "B", "C", "D", "E", "F"), reason)
+        return scoring.result()
 
     flat = [l for l in lines if l.angle_to_horizontal() <= BASE_MAX_DEG]
     if not flat:
@@ -68,75 +75,82 @@ def score(drawing: Drawing, item: int = 13) -> ItemResult:
     right = [l for l in radials if l is not central and _top(l)[0] >= _bottom(l)[0]]
     feet = {id(l): _foot(l, base) for l in radials}
     meeting = np.median(np.array(list(feet.values())), axis=0)
-    _check_straight(checks["A"], marks, lines, meeting)
+    _check_straight(scoring["A"], scoring.marks, lines, meeting)
     position = {id(l): base.position(feet[id(l)]) - base.t0 for l in radials}
     base_angle = base.angle_to_horizontal()
     lengths = [l.length for l in radials]
-    measures.update({"base_mm": base.length, "base_angle_deg": base_angle,
-                     "radiales_gauche": len(left), "radiales_droite": len(right),
-                     "ligne_centrale": float(central is not None)})
+    scoring.measures.update({"base_mm": base.length, "base_angle_deg": base_angle,
+                             "radiales_gauche": len(left), "radiales_droite": len(right),
+                             "ligne_centrale": float(central is not None)})
 
-    marks.append(mk.cote(*base.ends, f"base {fmt(base.length)} · {base_angle:.0f}°",
-                         side=(0.0, 1.0)))
+    scoring.marks.append(mk.cote(*base.ends, f"base {fmt(base.length)} · {base_angle:.0f}°",
+                                 side=(0.0, 1.0)))
     for line in radials:
-        marks.append(mk.segment(*sorted(line.ends, key=lambda p: p[1]), fmt(line.length)))
+        scoring.marks.append(mk.segment(*sorted(line.ends, key=lambda p: p[1]), fmt(line.length)))
 
     junctions = [(_join_gap(line, base), _bottom(line)) for line in radials]
     worst, worst_point = max(junctions, key=lambda j: j[0])
-    measures["jonction_max_mm"] = worst
+    scoring.measures["jonction_max_mm"] = worst
     if worst > 0.5:
-        marks.append(mk.point(worst_point, f"écart {fmt(worst)}"))
-    checks["B"].limit(worst, f"plus grand intervalle ou dépassement entre une ligne radiale et "
-                      f"la base {fmt(worst)} ≤ 2 mm", high=JOIN_MM)
+        scoring.marks.append(mk.point(worst_point, f"écart {fmt(worst)}"))
+    scoring["B"].limit(worst, f"plus grand intervalle ou dépassement entre une ligne radiale et "
+                       f"la base {fmt(worst)} ≤ {JOIN_MM.text}", high=JOIN_MM)
 
     layout_ok = central is not None and len(left) == PER_SIDE and len(right) == PER_SIDE
     layout_text = (f"{len(left)} à gauche, {len(right)} à droite, ligne centrale "
                    f"{'verticale' if central is not None else 'absente'}")
     convergence = float(np.median(list(position.values()))) / max(base.length, 1e-6)
-    measures["convergence_sur_base"] = convergence
+    scoring.measures["convergence_sur_base"] = convergence
     continuous = base.interruptions == 0 and base.doubled_length < DOUBLED_MAX_MM
 
-    general = checks["G"]
+    general = scoring["G"]
     general.add(continuous, "ligne de base d'un seul trait" if continuous
                 else f"ligne de base en plusieurs traits ({base.interruptions} interruption(s))")
-    general.limit(base_angle, f"base à {base_angle:.0f}° de l'horizontale (≤ 20°)",
+    general.limit(base_angle, f"base à {base_angle:.0f}° de l'horizontale "
+                  f"(≤ {GENERAL_BASE_DEG.text})",
                   high=GENERAL_BASE_DEG, unit="deg")
-    general.add(layout_ok, f"trois lignes radiales de chaque côté d'une ligne centrale ({layout_text})")
+    general.add(layout_ok, "trois lignes radiales de chaque côté d'une ligne centrale "
+                f"({layout_text})")
+    first, last = CONVERGENCE_THIRD
     general.limit(convergence, f"convergence au {convergence * 100:.0f} % de la base "
-                  "(tiers central : 33 à 67 %)", low=1 / 3, high=2 / 3, unit="part")
+                  "(tiers central : 33 à 67 %)", low=first, high=last, unit="part")
     for name, side in (("gauche", left), ("droite", right)):
         if len(side) >= 2:
             spread = _spread([feet[id(l)] for l in side])
-            measures[f"ecart_{name}_mm"] = spread
+            scoring.measures[f"ecart_{name}_mm"] = spread
             general.limit(spread, f"lignes radiales à {name} : à {fmt(spread)} au plus l'une "
-                          "de l'autre sur la base (≤ 5 mm)", high=GENERAL_SPREAD_MM)
+                          f"de l'autre sur la base (≤ {GENERAL_SPREAD_MM.text})",
+                          high=GENERAL_SPREAD_MM)
 
-    checks["C"].add(layout_ok, f"seulement trois lignes radiales de chaque côté d'une ligne "
-                    f"centrale ({layout_text})")
+    scoring["C"].add(layout_ok, f"seulement trois lignes radiales de chaque côté d'une ligne "
+                     f"centrale ({layout_text})")
 
     cluster, center = _largest_cluster(sorted(position.values()), GLOBAL_CLUSTER_MM)
-    measures["lignes_convergentes"] = cluster
-    checks["D"].limit(base_angle, f"base à {base_angle:.0f}° de l'horizontale (≤ 10°)",
-                      high=GLOBAL_BASE_DEG, unit="deg")
-    checks["D"].add(cluster >= GLOBAL_MIN_CONVERGING,
-                    f"{cluster} ligne(s) radiale(s) convergeant à moins de 3 mm (au moins 5)")
+    scoring.measures["lignes_convergentes"] = cluster
+    scoring["D"].limit(base_angle, f"base à {base_angle:.0f}° de l'horizontale "
+                       f"(≤ {GLOBAL_BASE_DEG.text})",
+                       high=GLOBAL_BASE_DEG, unit="deg")
+    scoring["D"].add(cluster >= GLOBAL_MIN_CONVERGING,
+                     f"{cluster} ligne(s) radiale(s) convergeant à moins de "
+                     f"{GLOBAL_CLUSTER_MM.text} (au moins {GLOBAL_MIN_CONVERGING.text})")
     at = center / max(base.length, 1e-6)
-    checks["D"].limit(at, f"point de convergence au {at * 100:.0f} % de la base "
-                      "(tiers central : 33 à 67 %)", low=1 / 3, high=2 / 3, unit="part")
+    scoring["D"].limit(at, f"point de convergence au {at * 100:.0f} % de la base "
+                       "(tiers central : 33 à 67 %)", low=first, high=last, unit="part")
 
     ratio = max(lengths) / max(min(lengths), 1e-6)
-    measures["rapport_radiales"] = ratio
-    checks["E"].limit(ratio, f"plus longue / plus courte ligne radiale {fmt_ratio(ratio)} "
-                      "≤ 1,2:1", high=LOCAL_MAX_RADIAL_RATIO, unit="ratio")
+    scoring.measures["rapport_radiales"] = ratio
+    scoring["E"].limit(ratio, f"plus longue / plus courte ligne radiale {fmt_ratio(ratio)} "
+                       f"≤ {LOCAL_MAX_RADIAL_RATIO.text}", high=LOCAL_MAX_RADIAL_RATIO, unit="ratio")
 
     extras = extra_elements(drawing, [base] + radials)
-    checks["F"].add(not extras, "aucun autre élément" if not extras
-                    else f"{len(extras)} élément(s) en trop")
-    checks["F"].limit(base.length, f"base {fmt(base.length)} ≥ 40 mm", low=LOCAL_MIN_BASE_MM)
+    scoring["F"].add(not extras, "aucun autre élément" if not extras
+                     else f"{len(extras)} élément(s) en trop")
+    scoring["F"].limit(base.length, f"base {fmt(base.length)} ≥ {LOCAL_MIN_BASE_MM.text}",
+                       low=LOCAL_MIN_BASE_MM)
     shortest = min(lengths)
-    checks["F"].limit(shortest, f"plus courte ligne radiale {fmt(shortest)} ≥ 15 mm",
-                      low=LOCAL_MIN_RADIAL_MM)
-    return result()
+    scoring["F"].limit(shortest, f"plus courte ligne radiale {fmt(shortest)} ≥ "
+                       f"{LOCAL_MIN_RADIAL_MM.text}", low=LOCAL_MIN_RADIAL_MM)
+    return scoring.result()
 
 
 def _check_straight(checks: Checks, marks: list, lines: list[StraightLine],

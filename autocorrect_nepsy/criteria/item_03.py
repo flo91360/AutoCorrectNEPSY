@@ -6,57 +6,53 @@ Seuils repris du manuel NEPSY-II (Copie de figures), reformulés.
 from __future__ import annotations
 
 from ..strokes import Drawing
-from .base import Checks, ItemResult, empty_result, fmt, fmt_ratio, unrecognized_note
+from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds, unrecognized_note
 from . import marks as mk
 from .shapes import STRAIGHT_MARGIN_MM, circle_metrics, circular_strokes
 
-MAX_DIAMETER_RATIO = 2.0  # rapport grand / petit diamètre
-MIN_SHORT_DIAMETER_MM = 30.0  # Global D : petit diamètre d'au moins 3 cm
+# Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
+threshold = manual_thresholds(__name__)
+MAX_DIAMETER_RATIO = threshold(2.0, "GD", "rapport du grand au petit diamètre, au plus", "ratio")
+MIN_SHORT_DIAMETER_MM = threshold(30.0, "D", "petit diamètre, au moins")
 
 
 def score(drawing: Drawing, item: int = 3) -> ItemResult:
+    scoring = Scoring(item, "GABCD")
     if drawing.is_empty:
-        return empty_result(item, ("G", "A", "B", "C", "D"), "aucun tracé dans la zone")
+        return scoring.empty()
     circles = circular_strokes(drawing)
     main = max(circles or drawing.strokes, key=lambda s: s.length)
     m = circle_metrics(main, drawing.stroke_width)
     half = m.perimeter / 2
+    ratio_text = f"rapport des diamètres {fmt_ratio(m.ratio)} ≤ {MAX_DIAMETER_RATIO.text}"
 
-    general = Checks()
+    general = scoring["G"]
     general.add(bool(circles), "forme circulaire reconnue")
     general.add(len(circles) <= 1, f"une seule forme circulaire ({len(circles)} trouvée(s))")
     general.limit(m.gap, f"intervalle {fmt(m.gap)} ≤ moitié du contour ({fmt(half)})", high=half)
     general.limit(m.overshoot, f"dépassement {fmt(m.overshoot)} ≤ moitié du contour ({fmt(half)})",
                   high=half)
-    general.limit(m.ratio, f"rapport des diamètres {fmt_ratio(m.ratio)} ≤ 2:1",
-                  high=MAX_DIAMETER_RATIO, unit="ratio")
+    general.limit(m.ratio, ratio_text, high=MAX_DIAMETER_RATIO, unit="ratio")
 
-    motor_a = Checks().add(m.rounded, "au moins un changement de direction arrondi")
-    motor_b = Checks().limit(
+    scoring["A"].add(m.rounded, "au moins un changement de direction arrondi")
+    scoring["B"].limit(
         m.longest_straight,
         f"plus longue section droite {fmt(m.longest_straight)} < grand diamètre "
         f"{fmt(m.long_diameter)} (marge de mesure 1 mm)",
         high=m.long_diameter - STRAIGHT_MARGIN_MM)
 
-    global_c = Checks().add(bool(circles), "figure circulaire quelconque")
-    global_d = Checks()
-    global_d.limit(m.short_diameter, f"petit diamètre {fmt(m.short_diameter)} ≥ 30 mm",
-                   low=MIN_SHORT_DIAMETER_MM)
-    global_d.limit(m.ratio, f"rapport des diamètres {fmt_ratio(m.ratio)} ≤ 2:1",
-                   high=MAX_DIAMETER_RATIO, unit="ratio")
+    scoring["C"].add(bool(circles), "figure circulaire quelconque")
+    scoring["D"].limit(m.short_diameter,
+                       f"petit diamètre {fmt(m.short_diameter)} ≥ {MIN_SHORT_DIAMETER_MM.text}",
+                       low=MIN_SHORT_DIAMETER_MM)
+    scoring["D"].limit(m.ratio, ratio_text, high=MAX_DIAMETER_RATIO, unit="ratio")
 
-    marks = [mk.segment(*m.long_ends, f"grand Ø {fmt(m.long_diameter)}"),
-             mk.segment(*m.short_ends, f"petit Ø {fmt(m.short_diameter)}"),
-             mk.segment(*m.straight_ends, f"section droite {fmt(m.longest_straight)}")]
-
-    return ItemResult(
-        item,
-        {"G": general.criterion("G"), "A": motor_a.criterion("A"),
-         "B": motor_b.criterion("B"), "C": global_c.criterion("C"),
-         "D": global_d.criterion("D")},
-        measures={"grand_diametre_mm": m.long_diameter, "petit_diametre_mm": m.short_diameter,
-                  "intervalle_mm": m.gap, "depassement_mm": m.overshoot,
-                  "section_droite_max_mm": m.longest_straight},
-        notes=[] if circles else [unrecognized_note("forme circulaire non reconnue")],
-        marks=marks,
-    )
+    scoring.marks += [mk.segment(*m.long_ends, f"grand Ø {fmt(m.long_diameter)}"),
+                      mk.segment(*m.short_ends, f"petit Ø {fmt(m.short_diameter)}"),
+                      mk.segment(*m.straight_ends, f"section droite {fmt(m.longest_straight)}")]
+    scoring.measures.update(grand_diametre_mm=m.long_diameter, petit_diametre_mm=m.short_diameter,
+                            intervalle_mm=m.gap, depassement_mm=m.overshoot,
+                            section_droite_max_mm=m.longest_straight)
+    if not circles:
+        scoring.notes.append(unrecognized_note("forme circulaire non reconnue"))
+    return scoring.result()
