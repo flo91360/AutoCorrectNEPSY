@@ -62,3 +62,19 @@ def test_totals_and_summary_use_the_retained_scores():
     assert totals(correction)["motricite"] == 7  # 4 items à 2 points, moins la correction
     text = summary_text(correction)
     assert text.startswith("Enfant : L.<M> – passation du 20/10/2026\n")
+
+
+def test_report_highlights_borderline_criteria(tmp_path):
+    from autocorrect_nepsy.criteria.base import Criterion
+
+    correction = reviewed_correction()
+    item4 = correction.items[0]
+    item4.result.criteria["F"] = Criterion("F", True, ["✓ rapport des côtés 1,28:1 (limite)",
+                                                       "✓ angles droits"], borderline=True)
+    _, html_path = save_results(correction, tmp_path)
+    html = html_path.read_text(encoding="utf-8")
+    assert "<li class='limite'>✓ rapport des côtés 1,28:1 (limite)</li>" in html
+    assert "<li>✓ angles droits</li>" in html
+    assert "– limite</span>" in html
+    assert "<td class='limite' title='mesure proche du seuil'>1</td>" in html
+    assert ".limite {" in html

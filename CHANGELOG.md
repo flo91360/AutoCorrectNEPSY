@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.13.2] - 2026-10-27
+
+- Les critères et les mesures limites ressortent en rouge et en gras dans le rapport, et en rouge dans la fenêtre Vérifier / corriger.
+
 ## [0.13.1] - 2026-10-26
 
 - Marge « limite » calibrée sur l'incertitude de la comparaison avec l'ergothérapeute : 0,5 mm (2 % du seuil pour une longueur), 2° pour un angle, 3 % pour un rapport, sans part proportionnelle pour les angles ; moins d'items signalés à tort (copies fidèles avec un tremblement de 0,5 mm : 5 sur 21 au lieu de 7), aucune note changée et aucun point perdu sans signalement de plus

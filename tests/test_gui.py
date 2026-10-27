@@ -279,6 +279,30 @@ def test_review_cancel_changes_nothing_and_needs_a_selected_item(app, scan, monk
     wait(app, lambda: not app.busy)
 
 
+def test_review_window_shows_borderline_criteria_in_red(app, scan):
+    from dataclasses import replace
+    from tkinter import ttk
+
+    from autocorrect_nepsy.criteria import PROCESS_NAMES
+
+    corrected(app, scan)
+    report = app.correction.items[0]
+    report.result.criteria["F"] = replace(report.result.criteria["F"], borderline=True)
+    app.tree.selection_set(str(report.item))
+    app.review_item()
+
+    def labels(widget):
+        for child in widget.winfo_children():
+            if isinstance(child, ttk.Label):
+                yield child
+            yield from labels(child)
+
+    styles = {str(label.cget("text")): str(label.cget("style")) for label in labels(app.review_window)}
+    red = {text for text, style in styles.items() if style == "Limit.TLabel"}
+    assert red == {PROCESS_NAMES["F"], f"outil : {report.result.score('F')} (limite)"}
+    app._close_review()
+
+
 def test_review_column_names_the_borderline_criteria():
     from autocorrect_nepsy.criteria import score_item
     from autocorrect_nepsy.criteria.base import Scoring

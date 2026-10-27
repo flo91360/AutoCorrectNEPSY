@@ -77,6 +77,11 @@ def manual_thresholds(module: str):
     return threshold
 
 
+# Suffixe des conditions dont la mesure est proche du seuil (voir ``Checks``) :
+# le rapport et la fenêtre de vérification les font ressortir en rouge.
+LIMIT_MARK = " (limite)"
+
+
 @dataclass
 class Criterion:
     code: str
@@ -116,7 +121,7 @@ class Checks:
             borderline = any(near for _, _, near in self._items)
         else:
             borderline = len(failing) == 1 and failing[0]
-        details = [("✓ " if ok else "✗ ") + text + (" (limite)" if near else "")
+        details = [("✓ " if ok else "✗ ") + text + (LIMIT_MARK if near else "")
                    for ok, text, near in self._items]
         return Criterion(code, met, details, borderline)
 

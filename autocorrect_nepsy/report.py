@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 
 from .criteria import CODES, PROCESS_NAMES
+from .criteria.base import LIMIT_MARK
 from .pipeline import Correction, ItemReport
 from .render import DISPLAY_WIDTH, measured_image
 
@@ -125,9 +126,17 @@ def write_html(correction: Correction, path: Path) -> None:
     rows = []
     for report in correction.items:
         row, auto = score_row(report), score_row(report, automatic=True)
-        cells = "".join(f"<td>{row[f]}</td>" if row[f] == auto[f] else
-                        f"<td class='corr' title='note de l’outil : {auto[f]}'>{row[f]}</td>"
-                        for f in CSV_FIELDS[1:])
+        limits = {FIELD_BY_CODE[code] for code, criterion in report.result.criteria.items()
+                  if criterion.borderline and code in FIELD_BY_CODE}
+
+        def cell(f: str) -> str:
+            if row[f] != auto[f]:
+                return f"<td class='corr' title='note de l’outil : {auto[f]}'>{row[f]}</td>"
+            if f in limits:
+                return f"<td class='limite' title='mesure proche du seuil'>{row[f]}</td>"
+            return f"<td>{row[f]}</td>"
+
+        cells = "".join(cell(f) for f in CSV_FIELDS[1:])
         state = "ok" if report.checked else "warn"
         rows.append(f'<tr><td><a href="#item{report.item}">{report.item}</a></td>{cells}'
                     f'<td class="{state}">{_review_state(report)}</td></tr>')
@@ -139,12 +148,16 @@ def write_html(correction: Correction, path: Path) -> None:
             criterion = result.criteria.get(code)
             if criterion is None:
                 continue
-            details = "".join(f"<li>{esc(d)}</li>" for d in criterion.details)
+            details = "".join(f"<li class='limite'>{esc(d)}</li>" if d.endswith(LIMIT_MARK)
+                              else f"<li>{esc(d)}</li>" for d in criterion.details)
             score = report.score(code)
             if code in report.corrections:
                 details = (f"<li class='corr'>✎ note changée par l’ergothérapeute "
                            f"(outil : {criterion.score})</li>{details}")
-            criteria.append(f"<tr><th>{PROCESS_NAMES[code]}</th>"
+            name = PROCESS_NAMES[code]
+            if criterion.borderline:
+                name = f"<span class='limite'>{name} – limite</span>"
+            criteria.append(f"<tr><th>{name}</th>"
                             f"<td class='score s{score}'>{score}</td>"
                             f"<td><ul>{details}</ul></td></tr>")
         notes = "".join(f"<p class='warn'>⚠ {esc(n)}</p>" for n in result.notes)
@@ -186,6 +199,7 @@ figcaption {{ color: #666; font-size: .85rem; }}
 .s1 {{ background: #e3f4e3; }} .s0 {{ background: #fbe4e4; }}
 .warn {{ color: #a15c00; }} .ok {{ color: #15803d; }}
 .corr {{ background: #fff3c4; font-weight: bold; }}
+.limite {{ color: #c62828; font-weight: bold; }}
 .enfant {{ font-size: 1.1rem; }}
 ul {{ margin: 0; padding-left: 0; list-style: none; }}
 .source {{ color: #666; font-size: .9rem; }}
@@ -194,7 +208,9 @@ ul {{ margin: 0; padding-left: 0; list-style: none; }}
 {who}
 <p>Proposition de cotation à valider par l'ergothérapeute. Les mesures sont en mm,
 d'après la résolution du scan. Les notes changées par l'ergothérapeute sont
-surlignées (la note de l'outil s'affiche au survol).</p>
+surlignées (la note de l'outil s'affiche au survol). Les critères et les mesures
+<span class='limite'>limites</span> (proches du seuil, la note peut basculer) sont
+en rouge et en gras.</p>
 {warnings}
 <table class="summary"><tr>{headers}</tr>{''.join(rows)}</table>
 {''.join(sections)}

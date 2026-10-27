@@ -29,6 +29,7 @@ from PIL import Image, ImageDraw, ImageTk
 from . import __version__
 from .compare import format_comparison, pair_scores, read_flags, read_scores
 from .criteria import CODES, PROCESS_NAMES, SUPPORTED_ITEMS
+from .criteria.base import LIMIT_MARK
 from .ink import INK_HUES
 from .identify import resolve
 from .layout import ITEMS_BY_PAGE, LayoutError, PreparedPage, prepare_page
@@ -45,6 +46,7 @@ PAGE_LABELS = {page_label(number): number for number in ITEMS_BY_PAGE}
 THUMB_WIDTH = 180
 REVIEW_IMAGE = 360  # taille maximale du dessin dans la fenêtre de vérification
 REVIEW_COLOR = "#fde7c4"
+LIMIT_COLOR = "#c62828"  # critère limite dans la fenêtre de vérification
 CHECKED_COLOR = "#e3f4e3"
 TOTAL_COLOR = "#e8eef8"
 HELP_TEXT = f"""Comment corriger un protocole
@@ -57,7 +59,7 @@ HELP_TEXT = f"""Comment corriger un protocole
 
 4. Indiquez si vous le souhaitez le pseudonyme ou les initiales de l'enfant et la date de passation (repris dans le rapport), puis cliquez sur « Lancer la correction automatique ».
 
-5. Les notes s'affichent à droite. Les lignes surlignées sont « à vérifier » : une mesure est proche d'un seuil, le dessin est ambigu ou la figure du modèle n'y a pas été retrouvée. Sélectionnez un item et cliquez sur « Vérifier / corriger l'item sélectionné… » pour confirmer ou changer ses notes. Le rapport détaillé montre chaque dessin et les mesures qui justifient chaque note.
+5. Les notes s'affichent à droite. Les lignes surlignées sont « à vérifier » : une mesure est proche d'un seuil, le dessin est ambigu ou la figure du modèle n'y a pas été retrouvée. Sélectionnez un item et cliquez sur « Vérifier / corriger l'item sélectionné… » pour confirmer ou changer ses notes ; les critères limites y sont en rouge. Le rapport détaillé montre chaque dessin et les mesures qui justifient chaque note, les critères et mesures limites en rouge et en gras.
 
 Les résultats sont enregistrés dans un dossier « Correction NEPSY » à côté des scans : cotation.csv (notes retenues, vos corrections comprises), cotation_automatique.csv (proposition de l'outil) et rapport.html. Ils sont réenregistrés à chaque vérification.
 
@@ -265,6 +267,7 @@ class App:
         style.configure("Name.TLabel", font=(base[0], 10, "bold"))
         style.configure("Ok.TLabel", foreground="#15803d")
         style.configure("Warn.TLabel", foreground="#b45309")
+        style.configure("Limit.TLabel", foreground=LIMIT_COLOR, font=(base[0], 10, "bold"))
         style.configure("Big.TButton", font=(base[0], 12, "bold"), padding=(16, 10))
         style.configure("Treeview", rowheight=26)
         style.configure("Treeview.Heading", font=(base[0], 9, "bold"))
@@ -721,12 +724,13 @@ class App:
             criterion = report.result.criteria[code]
             var = tk.IntVar(value=report.score(code))
             self.review_vars[code] = var
-            ttk.Label(grid, text=PROCESS_NAMES[code]).grid(row=line, column=0, sticky="w")
+            limit = {"style": "Limit.TLabel"} if criterion.borderline else {}
+            ttk.Label(grid, text=PROCESS_NAMES[code], **limit).grid(row=line, column=0, sticky="w")
             for column, value in ((1, 0), (2, 1)):
                 ttk.Radiobutton(grid, text=str(value), value=value, variable=var).grid(
                     row=line, column=column, padx=6)
-            automatic = f"outil : {criterion.score}" + (" (limite)" if criterion.borderline else "")
-            ttk.Label(grid, text=automatic, style="Hint.TLabel").grid(row=line, column=3, sticky="w")
+            automatic = f"outil : {criterion.score}" + (LIMIT_MARK if criterion.borderline else "")
+            ttk.Label(grid, text=automatic, style=limit.get("style", "Hint.TLabel")).grid(row=line, column=3, sticky="w")
         if report.result.notes:
             ttk.Label(frame, text="\n".join(f"⚠ {note}" for note in report.result.notes),
                       style="Warn.TLabel", wraplength=REVIEW_IMAGE + 280, justify="left").grid(

@@ -48,10 +48,11 @@ cotation que l'ergothérapeute valide.
    seuil (« ⚠ B F »), « ⚠ oui » quand c'est une remarque du rapport. Le
    rapport détaillé et le tableau des notes sont enregistrés dans un dossier
    « Correction NEPSY » à côté des scans. Double-cliquez sur un item pour voir
-   son dessin annoté.
+   son dessin annoté. Dans le rapport, les critères et les mesures limites
+   sont en rouge et en gras.
 5. Sélectionnez un item et cliquez sur **Vérifier / corriger l'item
    sélectionné…** : la fenêtre montre le dessin de l'enfant et la note de
-   l'outil pour chaque critère. Confirmez ou changez chaque note, puis
+   l'outil pour chaque critère, en rouge pour un critère limite. Confirmez ou changez chaque note, puis
    **Valider ces notes**. L'item passe en vert (« vérifié »), une note changée
    est marquée « ✎ », les totaux suivent et les résultats sont réenregistrés.
 
