@@ -60,6 +60,9 @@ def main(argv: list[str] | None = None) -> int:
     val.add_argument("--json", type=Path,
                      help="enregistre les résultats (à garder hors du dépôt : ils contiennent la "
                           "cotation automatique de chaque protocole)")
+    val.add_argument("--desaccords", type=Path,
+                     help="enregistre en CSV les critères où l'outil et l'ergothérapeute "
+                          "diffèrent (à garder hors du dépôt)")
     val.add_argument("--precedent", type=Path,
                      help="résultats JSON d'un passage précédent, pour voir ce qui a changé")
 
@@ -142,6 +145,9 @@ def _validate(args: argparse.Namespace) -> int:
     if args.json:
         validation.save(summary, args.json)
         print(f"\nRésultats enregistrés dans {args.json}")
+    if args.desaccords:
+        validation.write_disagreements(protocols, args.desaccords)
+        print(f"Désaccords enregistrés dans {args.desaccords}")
     return 0
 
 

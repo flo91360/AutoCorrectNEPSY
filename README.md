@@ -143,6 +143,19 @@ numéro d'item, comme une ligne de total, sont ignorées.
 
 ### Valider sur un corpus de protocoles
 
+Dans la fenêtre, le bouton **Valider un corpus…** fait la même chose sans ligne
+de commande. Il suffit de choisir le dossier du corpus. Chaque passage est
+enregistré dans le sous-dossier `Validation NEPSY` du corpus, sous un nom qui
+porte la version de l'outil et la date :
+
+- les chiffres (`.txt`) ;
+- les résultats pour comparer la version suivante (`.json`) ;
+- les désaccords critère par critère, pour Excel (`désaccords.csv`).
+
+Le passage suivant est comparé tout seul au précédent.
+
+En ligne de commande :
+
 ```bash
 autocorrect-nepsy valider donnees/validation --json donnees/validation-0.10.0.json
 autocorrect-nepsy valider donnees/validation --precedent donnees/validation-0.10.0.json
@@ -168,8 +181,14 @@ signalés, totaux à 1 point près dans 90 % des protocoles), à fixer avec
 l'ergothérapeute.
 
 `--json` enregistre les résultats, avec la cotation automatique de chaque
-protocole. Il faut garder ce fichier hors du dépôt. `--precedent` indique ce
-qui a changé depuis un passage précédent sur le même corpus.
+protocole. Il faut garder ce fichier hors du dépôt. `--desaccords` enregistre en
+CSV chaque critère où l'outil et l'ergothérapeute diffèrent. `--precedent`
+indique ce qui a changé depuis un passage précédent sur le même corpus.
+
+Chaque fichier de résultats porte la version de l'outil : colonne `version` de
+`cotation.csv`, `cotation_automatique.csv` et des désaccords, en-tête du
+rapport, nom des fichiers de validation. Une cotation reste ainsi attribuable à
+la version figée qui l'a produite.
 
 Pour ne pas régler l'outil sur ses propres données de validation :
 

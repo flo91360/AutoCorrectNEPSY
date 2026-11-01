@@ -18,8 +18,10 @@ de l'outil sur le même corpus : il reste lui aussi sur l'ordinateur.
 
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -28,10 +30,16 @@ from .compare import PROCESSES, Pair, cohen_kappa, format_kappa, pair_scores, re
 from .criteria import PROCESS_NAMES
 from .layout import LayoutError
 from .pipeline import correct
+from .report import CSV_DELIMITER, CSV_ENCODING
 from .scan import SCAN_SUFFIXES, natural_key
 
 REFERENCE_NAME = "cotation_ergo.csv"
 PAGES_NAME = "pages.txt"
+# Sous-dossier du corpus où la fenêtre enregistre chaque passage (ignoré comme
+# protocole : il ne contient pas de cotation de l'ergothérapeute).
+RESULTS_FOLDER = "Validation NEPSY"
+DISAGREEMENT_FIELDS = ["protocole", "item", "critere", "code", "outil", "ergo", "a_verifier",
+                       "version"]
 
 # Objectifs proposés par l'audit pour un usage clinique assisté, à fixer avec
 # l'ergothérapeute.
@@ -92,14 +100,21 @@ def load_protocol(folder: Path, ink: str = "bleu") -> Protocol:
 
 
 def run(corpus: str | Path, ink: str = "bleu",
-        progress: Callable[[str], None] | None = None) -> tuple[list[Protocol], list[str]]:
+        progress: Callable[[str], None] | None = None,
+        step: Callable[[int, int, str], None] | None = None) -> tuple[list[Protocol], list[str]]:
     """Corrige chaque protocole du corpus. Renvoie les protocoles corrigés et
-    les erreurs (« P003 : … ») des protocoles qui n'ont pas pu l'être."""
+    les erreurs (« P003 : … ») des protocoles qui n'ont pas pu l'être.
+
+    ``progress`` reçoit le résultat de chaque protocole, ``step`` (rang, nombre
+    de protocoles, nom) est appelé avant chacun."""
     corpus = Path(corpus)
     if not corpus.is_dir():
         raise ValueError(f"{corpus} : dossier introuvable")
     protocols, errors = [], []
-    for folder in protocol_folders(corpus):
+    folders = protocol_folders(corpus)
+    for index, folder in enumerate(folders):
+        if step:
+            step(index, len(folders), folder.name)
         try:
             protocols.append(load_protocol(folder, ink))
         except (LayoutError, ValueError) as error:
@@ -240,6 +255,49 @@ def format_summary(summary: dict) -> str:
     lines += [f"  {'atteint' if o['atteint'] else 'NON ATTEINT':<11} {o['objectif']}"
               for o in summary["objectifs"]]
     return "\n".join(lines)
+
+
+def disagreements(protocols: list[Protocol]) -> list[dict[str, str]]:
+    """Une ligne par critère où l'outil et l'ergothérapeute diffèrent."""
+    return [{"protocole": protocol.name, "item": str(pair.item),
+             "critere": PROCESS_NAMES[pair.code], "code": pair.code, "outil": str(pair.auto),
+             "ergo": str(pair.reference), "a_verifier": "oui" if pair.flagged else "",
+             "version": __version__}
+            for protocol in protocols for pair in protocol.pairs if pair.auto != pair.reference]
+
+
+def write_disagreements(protocols: list[Protocol], path: str | Path) -> None:
+    """Désaccords en CSV, au format d'Excel en français (comme cotation.csv)."""
+    with open(path, "w", newline="", encoding=CSV_ENCODING) as f:
+        writer = csv.DictWriter(f, fieldnames=DISAGREEMENT_FIELDS, delimiter=CSV_DELIMITER)
+        writer.writeheader()
+        writer.writerows(disagreements(protocols))
+
+
+def latest_results(corpus: str | Path) -> Path | None:
+    """Résultats JSON du dernier passage enregistré dans le corpus, s'il y en a."""
+    folder = Path(corpus) / RESULTS_FOLDER
+    found = sorted(folder.glob("*.json"), key=lambda p: p.stat().st_mtime) if folder.is_dir() else []
+    return found[-1] if found else None
+
+
+def save_in_corpus(corpus: str | Path, summary: dict, protocols: list[Protocol], text: str,
+                   now: datetime | None = None) -> Path:
+    """Enregistre un passage dans le sous-dossier « Validation NEPSY » du corpus :
+    chiffres (.txt), résultats pour comparer deux versions (.json) et
+    désaccords (.csv), tous nommés par la version de l'outil et la date.
+    Renvoie le chemin du .txt. Un passage précédent n'est jamais écrasé."""
+    folder = Path(corpus) / RESULTS_FOLDER
+    folder.mkdir(exist_ok=True)
+    stem = f"validation {summary['version']} {(now or datetime.now()):%Y-%m-%d %Hh%M}"
+    base, count = stem, 1
+    while any((folder / f"{stem}{suffix}").exists() for suffix in (".txt", ".json")):
+        count += 1
+        stem = f"{base} ({count})"
+    save(summary, folder / f"{stem}.json")
+    write_disagreements(protocols, folder / f"{stem} désaccords.csv")
+    (folder / f"{stem}.txt").write_text(text + "\n", encoding="utf-8")
+    return folder / f"{stem}.txt"
 
 
 def save(summary: dict, path: str | Path) -> None:

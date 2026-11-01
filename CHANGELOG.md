@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.0] - 2026-11-01
+
+- Bouton « Valider un corpus… » dans la fenêtre : validation sans ligne de commande, enregistrée dans le corpus avec les désaccords en CSV pour Excel et comparée au passage précédent ; version de l'outil dans cotation.csv, cotation_automatique.csv, le rapport et les fichiers de validation ; option --desaccords de la commande valider
+
 ## [0.13.2] - 2026-10-27
 
 - Les critères et les mesures limites ressortent en rouge et en gras dans le rapport, et en rouge dans la fenêtre Vérifier / corriger.

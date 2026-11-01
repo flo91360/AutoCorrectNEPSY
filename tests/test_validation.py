@@ -90,3 +90,31 @@ def test_validate_command(corpus, tmp_path, capsys):
     assert main(["valider", str(corpus), "--precedent", str(out)]) == 0
     assert "0 critère(s) changent" in capsys.readouterr().out
     assert main(["valider", str(tmp_path / "absent")]) == 1
+
+
+def test_disagreements_are_listed_for_excel(corpus, corrected, tmp_path, capsys):
+    from autocorrect_nepsy import __version__
+
+    out = tmp_path / "desaccords.csv"
+    validation.write_disagreements(corrected[0], out)
+    raw = out.read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf")
+    lines = raw[3:].decode("utf-8").splitlines()
+    assert lines[0] == "protocole;item;critere;code;outil;ergo;a_verifier;version"
+    assert [line.split(";")[:6] for line in lines[1:]] == [
+        ["P002", "5", "Motricité A", "A", "1", "0"], ["P002", "5", "Global D", "D", "1", "0"]]
+    assert all(line.endswith(__version__) for line in lines[1:])
+    assert main(["valider", str(corpus), "--desaccords", str(tmp_path / "d.csv")]) == 0
+    assert (tmp_path / "d.csv").read_bytes() == raw
+
+
+def test_runs_saved_in_the_corpus_never_overwrite_each_other(corrected, tmp_path):
+    from datetime import datetime
+
+    summary = validation.summarize(corrected[0])
+    now = datetime(2026, 11, 1, 14, 5)
+    first = validation.save_in_corpus(tmp_path, summary, corrected[0], "chiffres", now)
+    second = validation.save_in_corpus(tmp_path, summary, corrected[0], "chiffres", now)
+    assert first != second and second.name.endswith("(2).txt")
+    assert validation.latest_results(tmp_path) is not None
+    assert validation.latest_results(tmp_path / "vide") is None
