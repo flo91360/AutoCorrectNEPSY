@@ -10,12 +10,15 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from . import __version__
 from .criteria import CODES, PROCESS_NAMES
 from .criteria.base import LIMIT_MARK
 from .pipeline import Correction, ItemReport
 from .render import DISPLAY_WIDTH, measured_image
 
-# Mêmes colonnes que la retranscription de la feuille de cotation de l'ergo.
+# Mêmes colonnes que la retranscription de la feuille de cotation de l'ergo,
+# puis les colonnes propres à l'outil (``write_csv``), dont sa version : une
+# cotation reste attribuable à la version qui l'a produite.
 CSV_FIELDS = ["item", "general", "motricite_A", "motricite_B", "motricite_total",
               "global_C", "global_D", "global_total", "local_E", "local_F", "local_total"]
 FIELD_BY_CODE = {"G": "general", "A": "motricite_A", "B": "motricite_B", "C": "global_C",
@@ -55,7 +58,7 @@ def corrected_codes(report: ItemReport) -> list[str]:
 
 
 def write_csv(correction: Correction, path: Path, automatic: bool = False) -> None:
-    extra = ["a_verifier"] if automatic else ["a_verifier", "verifie", "corrige"]
+    extra = (["a_verifier"] if automatic else ["a_verifier", "verifie", "corrige"]) + ["version"]
     with open(path, "w", newline="", encoding=CSV_ENCODING) as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS + extra, delimiter=CSV_DELIMITER)
         writer.writeheader()
@@ -66,7 +69,7 @@ def write_csv(correction: Correction, path: Path, automatic: bool = False) -> No
                 flags = {"a_verifier": "oui" if report.to_review else "",
                          "verifie": "oui" if report.checked else "",
                          "corrige": " ".join(corrected_codes(report))}
-            writer.writerow(score_row(report, automatic) | flags)
+            writer.writerow(score_row(report, automatic) | flags | {"version": __version__})
 
 
 def _scale_bar(image: np.ndarray, ppm: float) -> None:
@@ -206,6 +209,7 @@ ul {{ margin: 0; padding-left: 0; list-style: none; }}
 </style></head><body>
 <h1>Copie de figures – correction automatique (prototype)</h1>
 {who}
+<p class='source'>AutoCorrect NEPSY version {__version__}</p>
 <p>Proposition de cotation à valider par l'ergothérapeute. Les mesures sont en mm,
 d'après la résolution du scan. Les notes changées par l'ergothérapeute sont
 surlignées (la note de l'outil s'affiche au survol). Les critères et les mesures

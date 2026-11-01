@@ -26,7 +26,7 @@ from tkinter import filedialog, messagebox, ttk
 import cv2
 from PIL import Image, ImageDraw, ImageTk
 
-from . import __version__
+from . import __version__, validation
 from .compare import format_comparison, pair_scores, read_flags, read_scores
 from .criteria import CODES, PROCESS_NAMES, SUPPORTED_ITEMS
 from .criteria.base import LIMIT_MARK
@@ -62,6 +62,8 @@ HELP_TEXT = f"""Comment corriger un protocole
 5. Les notes s'affichent à droite. Les lignes surlignées sont « à vérifier » : une mesure est proche d'un seuil, le dessin est ambigu ou la figure du modèle n'y a pas été retrouvée. Sélectionnez un item et cliquez sur « Vérifier / corriger l'item sélectionné… » pour confirmer ou changer ses notes ; les critères limites y sont en rouge. Le rapport détaillé montre chaque dessin et les mesures qui justifient chaque note, les critères et mesures limites en rouge et en gras.
 
 Les résultats sont enregistrés dans un dossier « Correction NEPSY » à côté des scans : cotation.csv (notes retenues, vos corrections comprises), cotation_automatique.csv (proposition de l'outil) et rapport.html. Ils sont réenregistrés à chaque vérification.
+
+Valider l'outil sur plusieurs protocoles : « Valider un corpus… » demande un dossier qui contient un sous-dossier par protocole (pseudonyme P001, P002…), avec ses scans, cotation_ergo.csv (votre cotation, faite sans voir celle de l'outil) et, si la page d'un scan ne peut pas être devinée, pages.txt (ex. 1,2,3,4,5,6). Les chiffres d'accord et la liste des désaccords sont enregistrés dans le sous-dossier « Validation NEPSY » du corpus, avec la version de l'outil ; le passage suivant indique ce qui a changé depuis le précédent.
 
 L'enfant doit dessiner au stylo de couleur (bleu par défaut). Les annotations au crayon à papier sont ignorées.
 
@@ -247,6 +249,7 @@ class App:
         self.review_window: tk.Toplevel | None = None
         self.review_report: ItemReport | None = None
         self.review_vars: dict[str, tk.IntVar] = {}
+        self.validation_window: tk.Toplevel | None = None
         root.title(f"{APP_NAME} – Copie de figures (version {__version__})")
         root.geometry("1260x780")
         root.minsize(1100, 640)
@@ -278,6 +281,9 @@ class App:
         ttk.Label(top, text="Correction automatique – Copie de figures (NEPSY-II)",
                   style="Title.TLabel").pack(side="left")
         ttk.Button(top, text="Aide", command=self.show_help).pack(side="right")
+        self.validate_button = ttk.Button(top, text="Valider un corpus…",
+                                          command=self.validate_corpus)
+        self.validate_button.pack(side="right", padx=6)
         ttk.Label(self.root, text=f"Prototype : items {SUPPORTED_ITEMS[0]} à {SUPPORTED_ITEMS[-1]}. "
                   "La cotation proposée est à valider par l'ergothérapeute.",
                   style="Hint.TLabel", padding=(16, 0, 16, 8)).pack(fill="x")
@@ -774,7 +780,7 @@ class App:
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self.busy = busy
         state = "disabled" if busy else "normal"
-        for button in (self.add_button, self.clear_button):
+        for button in (self.add_button, self.clear_button, self.validate_button):
             button.configure(state=state)
         self.review_button.configure(
             state="normal" if not busy and self.correction is not None else "disabled")
@@ -851,12 +857,73 @@ class App:
                                  "les colonnes item, general, motricite_A, motricite_B, global_C, "
                                  f"global_D, local_E, local_F.\n\n({error})")
             return
+        self._text_window("Comparaison avec la cotation de l'ergothérapeute", text)
+
+    def _text_window(self, title: str, text: str, folder: Path | None = None) -> tk.Toplevel:
         window = tk.Toplevel(self.root)
-        window.title("Comparaison avec la cotation de l'ergothérapeute")
-        box = tk.Text(window, width=72, height=28, wrap="word", padx=10, pady=10)
+        window.title(title)
+        if folder is not None:
+            ttk.Button(window, text="Ouvrir le dossier des résultats",
+                       command=lambda: self._open(folder)).pack(side="bottom", anchor="w",
+                                                                padx=10, pady=8)
+        box = tk.Text(window, width=86, height=32, wrap="word", padx=10, pady=10)
         box.insert("1.0", text)
         box.configure(state="disabled")
         box.pack(fill="both", expand=True)
+        return window
+
+    # -- validation sur un corpus ---------------------------------------------
+    def validate_corpus(self) -> None:
+        if self.busy:
+            return
+        name = filedialog.askdirectory(
+            title="Dossier du corpus : un sous-dossier par protocole, avec ses scans et "
+                  f"{validation.REFERENCE_NAME}", mustexist=True)
+        if name:
+            self.run_validation(Path(name))
+
+    def run_validation(self, corpus: Path) -> None:
+        """Corrige chaque protocole du corpus, le compare à la cotation de
+        l'ergothérapeute et enregistre le passage dans le corpus."""
+        ink = self.ink_var.get()
+
+        def task():
+            previous_path = validation.latest_results(corpus)
+            previous = validation.load(previous_path) if previous_path else None
+            protocols, errors = validation.run(corpus, ink, step=lambda i, n, name: self.worker.post(
+                self._progress, (i, n, f"Validation : protocole {name} ({i + 1}/{n})…")))
+            if not protocols:
+                return corpus, None, errors
+            summary = validation.summarize(protocols)
+            parts = [validation.format_summary(summary)]
+            if previous:
+                parts.append(validation.compare_versions(summary, previous, protocols))
+            if errors:
+                parts.append(f"{len(errors)} protocole(s) non corrigé(s) :\n"
+                             + "\n".join(f"  {error}" for error in errors))
+            text = "\n\n".join(parts)
+            saved = validation.save_in_corpus(corpus, summary, protocols, text)
+            return corpus, (text, saved), errors
+
+        self._set_busy(True, "Validation du corpus…")
+        self.worker.run(task, self._validated, self._failed)
+
+    def _validated(self, result) -> None:
+        corpus, done, errors = result
+        self._set_busy(False)
+        if done is None:
+            detail = ("\n\n" + "\n".join(errors[:10])) if errors else ""
+            messagebox.showerror(APP_NAME, f"Aucun protocole corrigé dans {corpus}.\n\nLe "
+                                 "dossier du corpus doit contenir un sous-dossier par protocole, "
+                                 f"avec ses scans et {validation.REFERENCE_NAME}.{detail}")
+            return
+        text, saved = done
+        self.validation_window = self._text_window(
+            f"Validation sur le corpus {corpus.name} (version {__version__})",
+            f"{text}\n\nEnregistré dans {saved.parent} :\n  {saved.name} (ces chiffres)\n"
+            f"  {saved.stem}.json (pour comparer la prochaine version)\n"
+            f"  {saved.stem} désaccords.csv (critère par critère, pour Excel)", saved.parent)
+        self.status.configure(text="Validation terminée.")
 
     def show_help(self) -> None:
         messagebox.showinfo(f"{APP_NAME} – aide", HELP_TEXT)

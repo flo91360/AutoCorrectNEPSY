@@ -2,6 +2,7 @@
 
 import csv
 
+from autocorrect_nepsy import __version__
 from autocorrect_nepsy.pipeline import PageInput, correct_pages
 from autocorrect_nepsy.report import (AUTOMATIC_NAME, save_results, summary_text, totals)
 from autocorrect_nepsy.scan import ScannedPage
@@ -31,6 +32,9 @@ def test_scores_file_holds_the_ergo_corrections_and_the_automatic_one_does_not(t
     assert final["4"]["verifie"] == final["4"]["corrige"] == ""
     assert automatic["5"]["motricite_A"] == "1" and automatic["5"]["motricite_total"] == "2"
     assert "verifie" not in automatic["5"]
+    # Version de l'outil sur chaque ligne et dans le rapport.
+    assert final["5"]["version"] == automatic["5"]["version"] == __version__
+    assert f"version {__version__}" in (tmp_path / "rapport.html").read_text(encoding="utf-8")
 
 
 def test_scores_file_opens_in_french_excel_and_is_read_back(tmp_path):

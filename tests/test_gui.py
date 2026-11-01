@@ -331,3 +331,40 @@ def test_icon_is_drawn():
     from autocorrect_nepsy.gui import app_icon
 
     assert app_icon(32).size == (32, 32)
+
+
+def test_corpus_is_validated_from_the_window(app, tmp_path, monkeypatch):
+    from autocorrect_nepsy import __version__, validation
+
+    from test_validation import FULL, protocol
+
+    opened = []
+    monkeypatch.setattr("autocorrect_nepsy.gui.open_path", opened.append)
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    protocol(corpus, "P001", FULL)
+    protocol(corpus, "P002", [FULL[0], "5,1,0,1,1,0,1,1\n", FULL[2], FULL[3]])
+    app.run_validation(corpus)
+    wait(app, lambda: app.validation_window is not None and not app.busy, timeout=120)
+    assert str(app.validate_button.cget("state")) == "normal"
+    saved = sorted(p.name for p in (corpus / validation.RESULTS_FOLDER).iterdir())
+    assert len(saved) == 3 and all(__version__ in name for name in saved)
+    [text_file] = [p for p in (corpus / validation.RESULTS_FOLDER).glob("*.txt")]
+    assert "Objectifs" in text_file.read_text(encoding="utf-8")
+
+    # Deuxième passage : comparé au premier, sans l'écraser.
+    app.validation_window = None
+    app.run_validation(corpus)
+    wait(app, lambda: app.validation_window is not None and not app.busy, timeout=120)
+    assert len(list((corpus / validation.RESULTS_FOLDER).iterdir())) == 6
+    [box] = [w for w in app.validation_window.winfo_children() if w.winfo_class() == "Text"]
+    assert "0 critère(s) changent" in box.get("1.0", "end")
+
+
+def test_empty_corpus_is_explained(app, tmp_path, monkeypatch):
+    errors = []
+    monkeypatch.setattr("autocorrect_nepsy.gui.messagebox.showerror",
+                        lambda title, text: errors.append(text))
+    app.run_validation(tmp_path)
+    wait(app, lambda: errors and not app.busy)
+    assert "un sous-dossier par protocole" in errors[0] and app.validation_window is None
