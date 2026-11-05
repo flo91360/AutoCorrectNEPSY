@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.3] - 2026-11-05
+<!-- planifikateur:0bb4e358-c0ec-4dd4-810e-165891bb5b0b -->
+
+- **figure 19 critère générale** : L'hypothèse de l'ergothérapeute est confirmée et j'ai corrigé la cause : le critère Général de l'item 19 n'échoue plus à tort quand la verticale de droite est repassée. Un vrai intervalle continue de le faire échouer. Les tests de l'item 19 passent, tout comme le contrôle pyflakes. La suite complète, lancée en cours de travail, n'avait qu'un échec : l'instantané de cotation, régénéré depuis. Je ne l'ai pas relancée en entier après les dernières retouches. **Cause.** J'ai reproduit le cas sur un dessin synthétique avec une deuxième verticale à droite, tracée à 1,5–2,5 mm de la première. L'outil réunit les deux traits en une seule ligne et mesure l'intervalle depuis les bouts de cette ligne. Or ces bouts sont placés sur un axe moyen qui passe entre les deux traits, donc à l'écart de l'un et de l'autre. Le programme trouvait ainsi un « intervalle » de 1,0 à 1,8 mm, au-delà du seuil de 1 mm, et Général échouait (le critère A aussi, qui utilise la même mesure). **Correction** (`autocorrect_nepsy/criteria/item_19.py`, fonction `_reach`). À chaque jonction, l'intervalle est maintenant la distance entre l'ellipse et le point le plus proche de la moitié haute ou basse de la verticale. Il suffit donc qu'un des deux traits touche l'ellipse, et un dépassement n'est pas compté. Les seuils du manuel n'ont pas changé. **Tests ajoutés** (`tests/test_criteria.py`, dessins synthétiques uniquement) : - **Reprise de tracé :** verticales qui dépassent de 3 mm et verticale de droite repassée à 2,5 mm. Jonction mesurée à 1 mm au plus, Général et A réussis. Ce test échoue avec l'ancien code. - **Vrai intervalle :** une verticale seule à 1,5 mm des ellipses sur le côté, ou arrêtée 8 mm sous l'ellipse du haut. Général et A restent échoués. **Instantané de cotation régénéré** (`tests/instantane_cotation.json`) : un seul cas change, le seau très déformé de l'item 19. Son critère Général reste échoué mais est maintenant marqué « limite ». **Limite.** Les verticales rejoignent les ellipses à leu
+
 ## [0.14.2] - 2026-11-05
 <!-- planifikateur:bb146978-8be7-4b51-acbe-b490c8025728 -->
 
