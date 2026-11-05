@@ -415,6 +415,44 @@ def test_item18_step_count_and_heights():
     assert uneven["D"] == 0 and uneven["E"] == 1
 
 
+def pinched_stairs(lean: float = 3.5, hook: float = 0.7, spur: float = 0.0):
+    """Escalier dont le côté gauche s'incurve vers la gauche dans ses 14 mm du
+    haut (angle haut-gauche pincé), tracé d'un seul trait qui commence au coin
+    par un petit crochet vers le haut à gauche ; ``spur`` : vrai dépassement
+    du palier du haut vers la gauche, au-delà du coin dessiné."""
+    points = stairs_points((9, 20))
+    (x, y), bottom = points[0], points[-1][1]
+    ys = np.linspace(bottom, y, 120)
+    bend = np.clip((ys - (y + 14.0)) / -14.0, 0, 1) ** 2
+    left = np.column_stack([x - lean * bend, ys])
+    corner = left[-1]
+    start = [corner + hook * np.array([-0.7, -0.7])] if hook else []
+    image = polyline(canvas(), np.vstack(start + [corner] + points[1:] + [left]))
+    if spur:
+        polyline(image, [corner, corner - (spur, 0.0)])
+    return image
+
+
+def test_item18_pinched_corner_is_not_an_overshoot():
+    # Angle pincé (côté incurvé, crochet au départ du trait) : l'ancienne mesure
+    # y voyait un dépassement de 2,8 mm ; c'est un tracé mal fait.
+    result = score(18, pinched_stairs())
+    assert scores(result)["B"] == 1, result.criteria["B"].details
+    assert result.measures["jonction_max_mm"] <= 1.0
+    assert result.measures["coin_mal_trace_max_mm"] > 0
+
+
+@pytest.mark.parametrize("spur", [1.5, 2.0, 3.0])
+def test_item18_real_overshoot_still_fails_motricite_b(spur):
+    plain = polyline(canvas(), stairs_points((9, 20)), closed=True)
+    corner = np.array(stairs_points((9, 20))[0])
+    for image in (polyline(plain, [corner, corner - (spur, 0.0)]),
+                  pinched_stairs(spur=spur)):
+        result = score(18, image)
+        assert scores(result)["B"] == 0
+        assert result.measures["jonction_max_mm"] > 1.0
+
+
 def bucket_image(top=(32, 30), **kwargs):
     image = canvas()
     for i, (points, closed) in enumerate(bucket(top, **kwargs)):

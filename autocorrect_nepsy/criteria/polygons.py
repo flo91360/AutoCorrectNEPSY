@@ -20,6 +20,9 @@ GAP_MM = 3.0  # interruption recousue pour retrouver une figure fermée
 MIN_GAP_MM = 0.3  # plus court, le vide entre deux traits n'est pas une interruption
 PX_PER_MM = 8.0
 OPENING_MM = 0.8  # petits dépassements et fentes effacés de la silhouette
+# Ouverture plus fine : efface encore un trait isolé (redessiné sur 0,25 mm)
+# mais arrondit peu les coins aigus (référence de la mesure des dépassements).
+FINE_OPENING_MM = 0.4
 MIN_REGION_MM2 = 6.0  # plus petite région fermée prise en compte
 SIDE_TRIM_MM = 1.5  # bouts d'un côté écartés pour ajuster sa droite
 MAX_CORNER_SHIFT_MM = 6.0  # coin recalculé trop loin du contour : on garde le sommet
@@ -29,6 +32,7 @@ ROUNDED_MM = 1.2  # coin arrondi : le contour passe loin du coin des deux côté
 EDGE_OFFSET_MM = 1.5 / PX_PER_MM
 SHORT_SIDE_FRACTION = 0.4  # côté plus court : coin mal fermé, fusionné
 WEDGE_TOLERANCE_MM = 0.3  # encre au-delà d'un coin : dépassement
+PROLONG_DEG = 30.0  # encre dans le prolongement d'un côté, à cet angle près : dépassement
 
 
 @dataclass
@@ -99,8 +103,8 @@ def raster(drawing: Drawing) -> Raster | None:
     return Raster(mask, origin, gaps, gap_points)
 
 
-def _opened(mask: np.ndarray) -> np.ndarray:
-    radius = max(1, int(round(OPENING_MM * PX_PER_MM)))
+def _opened(mask: np.ndarray, opening: float = OPENING_MM) -> np.ndarray:
+    radius = max(1, int(round(opening * PX_PER_MM)))
     disk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
     return cv2.morphologyEx(mask, cv2.MORPH_OPEN, disk)
 
@@ -110,16 +114,19 @@ def _clockwise(outline: np.ndarray) -> np.ndarray:
     return outline if signed_area(outline) > 0 else outline[::-1]
 
 
-def silhouette(drawing: Drawing) -> np.ndarray | None:
+def silhouette(drawing: Drawing, opening: float = OPENING_MM) -> np.ndarray | None:
     """Contour extérieur (mm) de la plus grande figure fermée, intérieur rempli,
-    petits dépassements et fentes effacés."""
+    petits dépassements et fentes effacés (``opening`` : rayon, en mm, de
+    l'ouverture qui les efface ; plus petit, les coins aigus restent mieux
+    dessinés)."""
     r = raster(drawing)
     if r is None:
         return None
     flood = np.pad(r.mask.copy(), 1)
     cv2.floodFill(flood, None, (0, 0), 2)
     filled = (flood[1:-1, 1:-1] != 2).astype(np.uint8)
-    contours, _ = cv2.findContours(_opened(filled), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    contours, _ = cv2.findContours(_opened(filled, opening), cv2.RETR_EXTERNAL,
+                                   cv2.CHAIN_APPROX_NONE)
     if not contours:
         return None
     return _clockwise(r.to_mm(max(contours, key=cv2.contourArea)))
@@ -262,18 +269,72 @@ def overshoot(drawing: Drawing, poly: Polygon, k: int, reach: float = 3.0) -> fl
     qui arrive au coin par l'intérieur de l'angle n'est pas un dépassement."""
     n = len(poly.vertices)
     a, v, c = poly.vertices[k - 1], poly.vertices[k], poly.vertices[(k + 1) % n]
-    points = drawing.points
-    near = points[np.linalg.norm(points - v, axis=1) <= reach]
-    if not len(near):
-        return 0.0
-    basis = np.column_stack([geo.unit(a - v), geo.unit(c - v)])
-    if abs(np.linalg.det(basis)) < 1e-6:
-        return 0.0
-    coords = np.linalg.solve(basis, (near - v).T).T  # le long des deux côtés
-    beyond = near[(coords < -WEDGE_TOLERANCE_MM).any(axis=1)]
+    beyond = _beyond_wedge(drawing.points, a, v, c, reach)
     if not len(beyond):
         return 0.0
     return float(np.minimum(_to_segment(beyond, a, v), _to_segment(beyond, v, c)).max())
+
+
+@dataclass
+class CornerInk:
+    """Encre au-delà d'un coin, séparée en dépassement et tracé mal fait."""
+
+    overshoot: float  # trait prolongé au-delà du coin dessiné (mm)
+    misdrawn: float  # encre hors de l'angle qui ne prolonge aucun côté (mm)
+    corner: np.ndarray  # coin dessiné
+
+
+def corner_ink(drawing: Drawing, poly: Polygon, k: int, outline: np.ndarray,
+               reach: float = 3.0) -> CornerInk:
+    """Encre qui sort de l'angle au coin ``k``, en distinguant un vrai
+    dépassement d'un coin mal tracé (angle pincé, côté incurvé, crochet).
+
+    Le coin dessiné est le point de la silhouette ``outline`` le plus avancé
+    vers l'extérieur du coin : un angle pincé ou un côté incurvé l'écarte du
+    coin des côtés ajustés, sans dépassement. L'encre qui suit la silhouette
+    n'est pas un dépassement ; parmi le reste, seule celle qui prolonge l'un
+    des côtés au-delà du coin dessiné (à moins de ``PROLONG_DEG`` de sa
+    direction) est un dépassement. Un crochet vers l'extérieur de l'angle
+    (stylo posé ou levé au coin) est un tracé mal fait."""
+    n = len(poly.vertices)
+    a, v, c = poly.vertices[k - 1], poly.vertices[k], poly.vertices[(k + 1) % n]
+    drawn = v
+    if turn(poly.vertices, k) > 0:
+        outward = -(geo.unit(a - v) + geo.unit(c - v))
+        nearby = outline[np.linalg.norm(outline - v, axis=1) <= MAX_CORNER_SHIFT_MM]
+        if len(nearby) and np.linalg.norm(outward) > 1e-6:
+            drawn = nearby[int(np.argmax((nearby - v) @ outward))]
+    points = drawing.points
+    near = points[(np.linalg.norm(points - v, axis=1) <= reach)
+                  | (np.linalg.norm(points - drawn, axis=1) <= reach)]
+    beyond = _beyond_wedge(near, a, v, c, np.inf)
+    if not len(beyond):
+        return CornerInk(0.0, 0.0, drawn)
+    away = np.minimum(_to_segment(beyond, a, v), _to_segment(beyond, v, c))
+    to_outline = np.sqrt(((beyond[:, None, :] - outline[None, :, :]) ** 2).sum(-1)).min(1)
+    away = np.minimum(away, to_outline)
+    offset = beyond - drawn
+    cos_max = np.cos(np.radians(PROLONG_DEG))
+    prolongs = np.zeros(len(beyond), bool)
+    for direction in (geo.unit(v - a), geo.unit(v - c)):
+        along = offset @ direction
+        prolongs |= along >= cos_max * np.linalg.norm(offset, axis=1)
+    over = float(away[prolongs].max()) if prolongs.any() else 0.0
+    misdrawn = float(away[~prolongs].max()) if (~prolongs).any() else 0.0
+    return CornerInk(over, misdrawn, drawn)
+
+
+def _beyond_wedge(points: np.ndarray, a: np.ndarray, v: np.ndarray, c: np.ndarray,
+                  reach: float) -> np.ndarray:
+    """Points à moins de ``reach`` de ``v`` qui sortent de l'angle (a, v, c)."""
+    near = points[np.linalg.norm(points - v, axis=1) <= reach]
+    if not len(near):
+        return near
+    basis = np.column_stack([geo.unit(a - v), geo.unit(c - v)])
+    if abs(np.linalg.det(basis)) < 1e-6:
+        return near[:0]
+    coords = np.linalg.solve(basis, (near - v).T).T  # le long des deux côtés
+    return near[(coords < -WEDGE_TOLERANCE_MM).any(axis=1)]
 
 
 def away_from(drawing: Drawing, outlines: list[np.ndarray], distance: float) -> float:

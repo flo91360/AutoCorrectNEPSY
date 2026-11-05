@@ -16,8 +16,8 @@ from .. import geometry as geo
 from ..strokes import Drawing
 from . import marks as mk
 from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
-from .polygons import (EDGE_OFFSET_MM, away_from, overshoot, polygon, raster, silhouette,
-                       simplify, wavy_changes)
+from .polygons import (EDGE_OFFSET_MM, FINE_OPENING_MM, away_from, corner_ink, polygon, raster,
+                       silhouette, simplify, wavy_changes)
 from .shapes import EXTRA_ELEMENT_MM
 
 # Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
@@ -82,12 +82,22 @@ def score(drawing: Drawing, item: int = 18) -> ItemResult:
                      f"toute la figure ({MOTOR_MAX_CHANGES.text} au plus)")
     r = raster(drawing)
     gaps = r.gaps if r is not None else []
-    over = [overshoot(drawing, poly, k) for k in range(n)]
+    # Un angle pincé, un côté incurvé ou un crochet au coin sortent de l'angle
+    # des côtés ajustés sans prolonger un côté : tracé mal fait, pas
+    # dépassement. La silhouette fine garde la pointe des angles aigus.
+    fine = silhouette(drawing, FINE_OPENING_MM)
+    inks = [corner_ink(drawing, poly, k, outline if fine is None else fine) for k in range(n)]
+    over = [ink.overshoot for ink in inks]
     worst = max(over + gaps)
     scoring.measures["jonction_max_mm"] = worst
     if over and max(over) > 0.5:
         k = int(np.argmax(over))
         scoring.marks.append(mk.point(v[k], f"dépasse {fmt(over[k])}"))
+    misdrawn = [k for k, ink in enumerate(inks) if ink.misdrawn > JOIN_MM and over[k] <= JOIN_MM]
+    scoring.measures["coin_mal_trace_max_mm"] = max(ink.misdrawn for ink in inks)
+    for k in misdrawn:
+        scoring.marks.append(mk.point(inks[k].corner, f"coin mal tracé {fmt(inks[k].misdrawn)} "
+                                      "(pas un dépassement)"))
     scoring["B"].limit(worst, f"plus grand intervalle ou dépassement aux intersections {fmt(worst)} "
                        f"≤ {JOIN_MM.text}", high=JOIN_MM)
 
