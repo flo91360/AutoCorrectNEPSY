@@ -23,6 +23,8 @@ JOIN_MM = threshold(2.0, "B", "intervalle ou dépassement entre une ligne radial
                     "au plus")
 PER_SIDE = threshold(3, "GC", "lignes radiales de chaque côté de la ligne centrale, exactement",
                      "nombre")
+GLOBAL_CENTRAL_DEG = threshold(20.0, "C", "écart à la verticale de la ligne centrale (4ᵉ des 7 "
+                               "lignes radiales), au plus", "deg")
 GENERAL_BASE_DEG = threshold(20.0, "G", "écart de la base à l'horizontale, au plus", "deg")
 CONVERGENCE_THIRD = (threshold(1 / 3, "GD", "position du point de convergence sur la base, au "
                                "moins (tiers central)", "part"),
@@ -122,8 +124,7 @@ def score(drawing: Drawing, item: int = 13) -> ItemResult:
                           f"de l'autre sur la base (≤ {GENERAL_SPREAD_MM.text})",
                           high=GENERAL_SPREAD_MM)
 
-    scoring["C"].add(layout_ok, f"seulement trois lignes radiales de chaque côté d'une ligne "
-                     f"centrale ({layout_text})")
+    _check_global_c(scoring["C"], scoring.measures, radials, feet, layout_ok, layout_text)
 
     cluster, center = _largest_cluster(sorted(position.values()), GLOBAL_CLUSTER_MM)
     scoring.measures["lignes_convergentes"] = cluster
@@ -151,6 +152,33 @@ def score(drawing: Drawing, item: int = 13) -> ItemResult:
     scoring["F"].limit(shortest, f"plus courte ligne radiale {fmt(shortest)} ≥ "
                        f"{LOCAL_MIN_RADIAL_MM.text}", low=LOCAL_MIN_RADIAL_MM)
     return scoring.result()
+
+
+def _check_global_c(checks: Checks, measures: dict, radials: list[StraightLine],
+                    feet: dict, layout_ok: bool, layout_text: str) -> None:
+    """Global C : seulement trois lignes radiales de chaque côté d'une ligne
+    centrale relativement verticale. Avec sept lignes radiales, la ligne
+    centrale est la 4ᵉ dans l'ordre de l'éventail (trois de part et d'autre),
+    acceptée jusqu'à ``GLOBAL_CENTRAL_DEG`` de la verticale, même si une
+    voisine est plus verticale qu'elle."""
+    if len(radials) != 2 * PER_SIDE + 1:
+        checks.add(layout_ok, f"seulement trois lignes radiales de chaque côté d'une ligne "
+                   f"centrale ({layout_text})")
+        return
+    fan = sorted(radials, key=lambda l: _polar_angle(l, feet[id(l)]))
+    angle = fan[PER_SIDE].angle_to_vertical()
+    measures["centrale_angle_deg"] = angle
+    checks.add(True, "seulement trois lignes radiales de chaque côté d'une ligne centrale "
+               f"({2 * PER_SIDE + 1} lignes radiales)")
+    checks.limit(angle, f"ligne centrale (4ᵉ ligne radiale) à {angle:.0f}° de la verticale "
+                 f"(≤ {GLOBAL_CENTRAL_DEG.text})", high=GLOBAL_CENTRAL_DEG, unit="deg")
+
+
+def _polar_angle(line: StraightLine, foot: np.ndarray) -> float:
+    """Direction de la ligne radiale depuis son pied, en degrés (0 : vers la
+    droite, 90 : vers le haut, 180 : vers la gauche)."""
+    dx, dy = _top(line) - foot
+    return float(np.degrees(np.arctan2(-dy, dx)))
 
 
 def _check_straight(checks: Checks, marks: list, lines: list[StraightLine],
