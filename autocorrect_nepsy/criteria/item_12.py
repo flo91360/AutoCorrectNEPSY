@@ -41,6 +41,7 @@ STIMULUS_CHANGES = 2  # une crête et un creux : changements de direction du mod
 AXIS_TOUCH_MM = 1.0  # une extrémité à moins de cette distance touche l'axe
 CROSS_MAX_GAP_MM = 1.0  # les deux lignes se coupent
 ON_CURVE_MM = 1.5  # encre plus éloignée des deux lignes : autre élément
+RETRACE_MM = 2.5  # reprise de tracé repliée à moins de cette distance du premier tracé
 
 
 def score(drawing: Drawing, item: int = 12) -> ItemResult:
@@ -112,8 +113,10 @@ def score(drawing: Drawing, item: int = 12) -> ItemResult:
     scoring["E"].add(not extras, "seulement deux lignes" if not extras
                      else f"{len(extras)} trait(s) en plus des deux lignes")
     for name, d in info.items():
-        scoring["E"].add(d["s_shape"], f"ligne {name} sinusoïdale : une crête et un creux "
-                         f"({_shape_text(d)})")
+        retrace = (f", reprise de tracé de {fmt(d['retrace'])} rattachée au premier tracé"
+                   if d["retrace"] else "")
+        scoring["E"].add(d["local_s_shape"], f"ligne {name} sinusoïdale : une crête et un creux "
+                         f"({_shape_text(d, 'local_extrema')}{retrace})")
 
     scoring["F"].add(not extras, "aucun autre élément" if not extras
                      else f"{len(extras)} élément(s) en trop")
@@ -167,7 +170,14 @@ def _describe(curve: Curve, x: np.ndarray, vertical: bool) -> dict:
     ratio = max(ends) / max(min(ends), 1e-6)
     offsets = curve.offsets()
     found = extrema(offsets, max(SHAPE_MM, SHAPE_FRACTION * chord))
-    s_shape = len(found) == 2 and found[0][1] * found[1][1] < 0
+    s_shape = _is_s(found)
+    # Local E : une reprise de tracé repliée près du premier tracé n'est ni une
+    # crête ni un creux ; elle est rattachée au tracé initial.
+    local = curve.without_retraces(RETRACE_MM, SHAPE_MM)
+    local_found = (found if local is curve else
+                   extrema(local.offsets(), max(SHAPE_MM, SHAPE_FRACTION * local.chord_length)))
+    retrace = float(np.linalg.norm(np.diff(curve.points, axis=0), axis=1).sum()
+                    - np.linalg.norm(np.diff(local.points, axis=0), axis=1).sum())
     # Sens du modèle : creux puis crête pour l'horizontale (de gauche à droite),
     # bosse à gauche puis à droite pour la verticale (de haut en bas).
     oriented = bool(found) and found[0][1] > 0
@@ -175,6 +185,7 @@ def _describe(curve: Curve, x: np.ndarray, vertical: bool) -> dict:
     tips_ok, tips_text = _tips_reach_axis(curve, x, vertical)
     return {"chord": chord, "angle": angle, "at": at, "ends": ends, "ratio": ratio,
             "extrema": found, "s_shape": s_shape, "oriented": oriented,
+            "local_extrema": local_found, "local_s_shape": _is_s(local_found), "retrace": retrace,
             "extra_changes": max(0, changes - STIMULUS_CHANGES),
             "tips_ok": tips_ok, "tips_text": tips_text}
 
@@ -197,9 +208,14 @@ def _tips_reach_axis(curve: Curve, x: np.ndarray, vertical: bool) -> tuple[bool,
     return ok, " ; ".join(texts)
 
 
-def _shape_text(d: dict) -> str:
-    signs = "".join("+" if v > 0 else "−" for _, v in d["extrema"])
-    return f"{len(d['extrema'])} crête(s) ou creux" + (f" ({signs})" if signs else "")
+def _is_s(found: list[tuple[int, float]]) -> bool:
+    """Une crête et un creux, de part et d'autre de la corde."""
+    return len(found) == 2 and found[0][1] * found[1][1] < 0
+
+
+def _shape_text(d: dict, key: str = "extrema") -> str:
+    signs = "".join("+" if v > 0 else "−" for _, v in d[key])
+    return f"{len(d[key])} crête(s) ou creux" + (f" ({signs})" if signs else "")
 
 
 def _extras(drawing: Drawing, curves: list[Curve]) -> list[float]:

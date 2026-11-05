@@ -265,6 +265,37 @@ def test_item12_reversed_s_fails_general():
     assert result["G"] == 0 and result["E"] == 1 and result["C"] == 1
 
 
+@pytest.mark.parametrize("vertical", [False, True])
+@pytest.mark.parametrize("at_end", [False, True])
+def test_item12_retrace_near_first_stroke_is_not_an_extra_crest(vertical, at_end):
+    """Reprise de tracé repliée au bout d'une ligne en « S », à 2 mm du
+    premier tracé : elle est rattachée au tracé initial, sans crête en plus."""
+    lines = [s_curve((32, 44)), s_curve((32, 44), vertical=True)]
+    line = lines[vertical][::-1] if at_end else lines[vertical]
+    tip = line[:45]  # environ 8 mm depuis le bout de la ligne
+    chord = tip[-1] - tip[0]
+    normal = np.array([-chord[1], chord[0]]) / np.linalg.norm(chord)
+    # D'un seul trait : la reprise remonte jusqu'au bout puis repart sur la ligne.
+    lines[vertical] = np.vstack([tip[::-1] + 2.0 * normal, line])
+    image = canvas()
+    polyline(image, lines[0])
+    polyline(image, lines[1], seed=1)
+    result = score(12, image)
+    assert result.criteria["E"].score == 1, result.criteria["E"].details
+    assert "reprise de tracé" in " ".join(result.criteria["E"].details)
+    assert result.criteria["F"].score == 1
+
+
+def test_item12_extra_crest_still_fails_local_e():
+    """Une vraie crête en plus (ligne en double « S ») reste refusée."""
+    image = canvas()
+    polyline(image, s_curve((32, 44)))
+    t = np.linspace(-18, 18, 200)
+    polyline(image, np.column_stack([32 + 6 * np.sin(np.pi * t / 9), 44 + t]), seed=1)
+    result = score(12, image)
+    assert result.criteria["E"].score == 0, result.criteria["E"].details
+
+
 def fan(radials, length=25.0, base=(7, 57), y=58, center=32):
     image = canvas()
     polyline(image, [(base[0], y), (base[1], y)])
