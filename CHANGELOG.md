@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.3] - 2026-11-05
+<!-- planifikateur:3cb75d0d-e2b6-484d-8869-2f191cb34aca -->
+
+- **figure 18 critère motricité B** : À l'item 18, un angle pincé n'est plus compté comme un dépassement : sur votre dessin, Motricité B est maintenant réussi, avec 0,1 mm mesuré au lieu de 2,6 mm. Le seuil du manuel (1 mm) n'a pas changé. Les tests passent (309, 1 ignoré, sans erreur pyflakes). **Pourquoi l'outil voyait 2,8 mm.** Il calcule chaque coin comme le croisement de deux droites ajustées sur les côtés. Puis il compte comme dépassement toute encre qui sort de l'angle formé par ces droites. Sur votre dessin, le côté gauche s'incurve vers la gauche près du haut : l'encre du coin réel se trouve donc à l'extérieur de ce coin calculé. S'y ajoute le petit crochet en diagonale laissé par le stylo au départ du trait. Les deux comptaient comme dépassement. **Ce qui change.** Le coin est maintenant pris là où il est réellement dessiné. Seule l'encre qui prolonge un côté au-delà de ce coin (à 30° près) compte comme dépassement. L'encre qui suit le tracé de la figure (côté incurvé) ou qui part en crochet vers l'extérieur (stylo posé ou levé) est classée comme coin mal tracé. Pour rester vigilant, ce cas est affiché sur le rapport (« coin mal tracé … (pas un dépassement) ») et dans la mesure `coin_mal_trace_max_mm`, sans faire échouer Motricité B. **Autres items inchangés.** L'item 17 utilise la même mesure des dépassements, qui est conservée telle quelle ; la nouvelle ne sert qu'à l'item 18. **Vérification.** - **Pièce jointe :** je l'ai reconstruite en local à partir de la capture d'écran, qui est en basse résolution, sans rien verser dans le dépôt. L'ancienne mesure y donne 2,6 mm, proche des 2,8 mm de l'outil, et la nouvelle 0,1 mm. C'est une approximation : il faudra confirmer sur le scan d'origine. - **Nouveaux tests synthétiques :** un escalier à angle pincé avec crochet (ancienne mesure : 2,9 mm) est noté réussi. De vrais dépassements de 1,5, 2 et 3 mm restent notés échoués, sur un coin net comme sur un coin pincé. - **Instantané de cotation :** j'ai régénéré `tests/instantane_cotation.json`. Une se
+
 ## [0.14.2] - 2026-11-05
 <!-- planifikateur:bb146978-8be7-4b51-acbe-b490c8025728 -->
 
