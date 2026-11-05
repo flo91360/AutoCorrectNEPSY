@@ -472,6 +472,37 @@ def test_item19_circles_and_detached_base():
     assert detached["G"] == 0 and detached["C"] == 0
 
 
+def bucket_with_verticals(left, right, extra=()):
+    """Seau de l'item 19 (haut centré en (32, 30), demi-axes 28 et 15,6 mm,
+    base 24 mm plus bas) aux verticales ``left`` et ``right`` remplacées, avec
+    des traits ``extra`` en plus."""
+    image = canvas()
+    strokes = bucket((32, 30))
+    strokes[3], strokes[4] = (left, False), (right, False)
+    for i, (points, closed) in enumerate(strokes + [(p, False) for p in extra]):
+        polyline(image, points, closed=closed, seed=i)
+    return image
+
+
+def test_item19_retraced_vertical_and_overshoots_are_not_gaps():
+    # Verticales qui dépassent de 3 mm les ellipses, et celle de droite
+    # repassée 2,5 mm à côté (reprise de tracé) : pas d'intervalle.
+    image = bucket_with_verticals([(4, 27), (4, 57)], [(60, 27), (60, 57)],
+                                  extra=[[(62.5, 30.5), (62.5, 53.5)]])
+    result = score(19, image)
+    assert result.measures["jonction_max_mm"] <= 1.0
+    assert scores(result)["G"] == 1 and scores(result)["A"] == 1
+
+
+@pytest.mark.parametrize("right", [[(61.5, 30), (61.5, 54)], [(60, 38), (60, 54)]])
+def test_item19_vertical_that_misses_the_ellipse_fails_global(right):
+    # Verticale de droite à 1,5 mm de côté des ellipses, ou arrêtée 8 mm sous
+    # l'ellipse du haut : vrai intervalle.
+    result = score(19, bucket_with_verticals([(4, 30), (4, 54)], right))
+    assert result.measures["jonction_max_mm"] > 1.0
+    assert scores(result)["G"] == 0 and scores(result)["A"] == 0
+
+
 def flower_image(**kwargs):
     image = canvas()
     for i, petal in enumerate(flower((32, 44), **kwargs)):

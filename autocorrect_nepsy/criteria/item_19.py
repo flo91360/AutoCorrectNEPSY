@@ -77,8 +77,7 @@ def score(drawing: Drawing, item: int = 19) -> ItemResult:
     # Jonctions des verticales avec l'ellipse externe (haut) et la base (bas).
     joins = []
     for line in verticals:
-        top, bottom = sorted(line.ends, key=lambda p: p[1])
-        joins += [_reach(top, outer), _reach(bottom, base)]
+        joins += [_reach(line, outer, top=True), _reach(line, base, top=False)]
     join = max(joins) if joins else float("inf")
     ring = _ring_depth(base, outer, inner)
     crossing = crosses(base, outer) and crosses(base, inner)
@@ -226,12 +225,24 @@ def _verticals(drawing: Drawing, ellipses: list[Ellipse], outer: Ellipse,
     return found
 
 
-def _reach(point: np.ndarray, ellipse: Ellipse) -> float:
-    """Intervalle entre le bout d'une verticale et le tracé de l'ellipse
-    (un dépassement n'est pas un intervalle)."""
-    if not len(ellipse.points):
+def _reach(line: StraightLine, ellipse: Ellipse, top: bool) -> float:
+    """Intervalle entre le haut (``top``) ou le bas d'une verticale et le
+    tracé de l'ellipse : distance du point de la moitié concernée de la
+    verticale le plus proche du tracé.
+
+    On ne prend pas le bout projeté sur l'axe de la ligne : quand la
+    verticale est repassée (deux traits côte à côte, reprise de tracé), les
+    deux traits forment une seule ligne dont l'axe passe entre eux, et son
+    bout, à l'écart des deux traits, passerait pour un intervalle. Il suffit
+    qu'un des traits atteigne l'ellipse ; un dépassement n'est pas non plus
+    un intervalle."""
+    if not len(ellipse.points) or not len(line.points):
         return float("inf")
-    return float(np.linalg.norm(ellipse.points - point, axis=1).min())
+    pts = line.points
+    middle = (pts[:, 1].min() + pts[:, 1].max()) / 2
+    half = pts[pts[:, 1] <= middle] if top else pts[pts[:, 1] >= middle]
+    d = np.sqrt(((half[:, None, :] - ellipse.points[None, :, :]) ** 2).sum(-1))
+    return float(d.min())
 
 
 def _ring_depth(base: Ellipse, outer: Ellipse, inner: Ellipse) -> float:
