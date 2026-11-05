@@ -606,6 +606,20 @@ def test_item13_radial_lines_of_at_least_15_mm(size, local_f):
     assert result["F"] == local_f
 
 
+@pytest.mark.parametrize("tilt, global_c, borderline", [(12.0, 1, False), (19.0, 1, True),
+                                                       (21.0, 0, True), (26.0, 0, False)])
+def test_item13_central_line_up_to_20_degrees_from_vertical(tilt, global_c, borderline):
+    # La 3ᵉ ligne (à 10° de la verticale) est plus verticale que la 4ᵉ, la centrale.
+    angles = (165, 140, 100, 90 - tilt, 40, 28, 16)
+    result = score(13, fan([(a, 25.0) for a in angles]))
+    criterion = result.criteria["C"]
+    assert criterion.score == global_c, criterion.details
+    assert criterion.borderline == borderline, criterion.details
+    if borderline:
+        assert result.to_review
+    assert abs(result.measures["centrale_angle_deg"] - tilt) < 1.5
+
+
 @pytest.mark.parametrize("width, global_d", [(57.0, 1), (59.0, 0)])
 def test_item17_outer_lines_more_than_45_degrees(width, global_d):
     # Lignes extérieures à 46° (largeur 57 mm) et 44° (largeur 59 mm).
