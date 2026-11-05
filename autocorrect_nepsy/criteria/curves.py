@@ -47,6 +47,39 @@ class Curve:
     def reversed(self) -> "Curve":
         return Curve(self.points[::-1].copy(), self.interruptions)
 
+    def without_retraces(self, near_mm: float, fold_mm: float) -> "Curve":
+        """Même courbe sans les reprises de tracé repliées sur ses bouts.
+
+        Une reprise proche du premier tracé (aller-retour au bout de la ligne,
+        à moins de ``near_mm`` du tracé) est suivie jusqu'à son demi-tour puis
+        le long du tracé initial : elle ajouterait une crête qui n'existe pas.
+        Le bout de la courbe est alors ramené au demi-tour, sur le tracé
+        initial. Un repli de moins de ``fold_mm`` est ignoré."""
+        points = self._trim_retrace(self.points, near_mm, fold_mm)
+        points = self._trim_retrace(points[::-1], near_mm, fold_mm)[::-1]
+        if len(points) == len(self.points):
+            return self
+        steps = np.linalg.norm(np.diff(points, axis=0), axis=1)
+        return Curve(points.copy(), int((steps > INTERRUPTION_STEP_MM).sum()))
+
+    @staticmethod
+    def _trim_retrace(points: np.ndarray, near_mm: float, fold_mm: float) -> np.ndarray:
+        """Retire la reprise repliée au début de ``points`` (s'il y en a une)."""
+        if len(points) < 3:
+            return points
+        from_start = np.linalg.norm(points - points[0], axis=1)
+        depth = np.maximum.accumulate(from_start)
+        # Demi-tour : la courbe s'éloigne du bout puis revient près de lui.
+        back = np.nonzero((from_start <= near_mm) & (depth - from_start >= fold_mm))[0]
+        if not len(back):
+            return points
+        turn = int(np.argmax(from_start[:back[-1] + 1]))
+        retrace, rest = points[:turn], points[turn:]
+        dist = np.sqrt(((retrace[:, None, :] - rest[None, :, :]) ** 2).sum(-1)).min(axis=1)
+        if dist.max() > near_mm:  # boucle ou autre élément, pas une reprise proche
+            return points
+        return rest
+
     def offsets(self) -> np.ndarray:
         """Écart signé de chaque point à la corde (positif à droite en
         parcourant la corde, l'axe des y de l'image allant vers le bas)."""
