@@ -192,6 +192,27 @@ class Drawing:
         found[inside] = self.ink[px[inside, 1], px[inside, 0]] > 0
         return found
 
+    @cached_property
+    def _depth(self) -> np.ndarray | None:
+        if self.ink is None:
+            return None
+        ink = (self.ink > 0).astype(np.uint8)
+        return cv2.distanceTransform(ink, cv2.DIST_L2, 5) / max(self.px_per_mm, 1e-6)
+
+    def ink_depth(self, points: np.ndarray) -> np.ndarray:
+        """Pour chaque point (mm), distance (mm) au bord de l'encre : environ la
+        demi-épaisseur du trait au milieu d'un trait, davantage dans une zone
+        coloriée, 0 hors de l'encre."""
+        depth = self._depth
+        if depth is None:
+            return np.full(len(points), self.stroke_width / 2)
+        px = np.round(np.asarray(points) * self.px_per_mm).astype(int)
+        h, w = depth.shape
+        inside = (px[:, 0] >= 0) & (px[:, 0] < w) & (px[:, 1] >= 0) & (px[:, 1] < h)
+        found = np.zeros(len(points))
+        found[inside] = depth[px[inside, 1], px[inside, 0]]
+        return found
+
     @property
     def is_empty(self) -> bool:
         return not self.strokes
