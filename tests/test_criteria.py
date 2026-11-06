@@ -296,12 +296,28 @@ def test_item12_extra_crest_still_fails_local_e():
     assert result.criteria["E"].score == 0, result.criteria["E"].details
 
 
-def fan(radials, length=25.0, base=(7, 57), y=58, center=32):
+def fan(radials, length=25.0, base=(7, 57), y=58, center=32, base_tilt=0.0, base_gap=None,
+        blob=None):
+    """Éventail synthétique. ``base_tilt`` : inclinaison de la base (degrés,
+    bout droit plus haut) ; ``base_gap`` : (début, fin) en x d'une coupure de la
+    base, tracée alors en deux traits ; ``blob`` : diamètre (mm) d'une tache
+    d'encre au point de convergence."""
     image = canvas()
-    polyline(image, [(base[0], y), (base[1], y)])
+    slope = np.tan(np.radians(base_tilt))
+
+    def on_base(x):
+        return (x, y - (x - center) * slope)
+
+    if base_gap is None:
+        polyline(image, [on_base(base[0]), on_base(base[1])])
+    else:
+        polyline(image, [on_base(base[0]), on_base(base_gap[0])])
+        polyline(image, [on_base(base_gap[1]), on_base(base[1])], seed=20)
     for i, (angle, size) in enumerate(radials):
         a = np.radians(angle)
         polyline(image, [(center, y), (center + size * np.cos(a), y - size * np.sin(a))], seed=i)
+    if blob:
+        dot(image, (center, y), blob)
     return image
 
 
@@ -369,6 +385,55 @@ def test_item13_off_center_convergence_fails_general():
     seven = [(a, 25.0) for a in np.arange(22.5, 180, 22.5)]
     result = scores(score(13, fan(seven, center=14, base=(5, 59))))
     assert result["G"] == 0 and result["D"] == 0 and result["C"] == 1
+
+
+# Configuration relevée sur une copie : base légèrement inclinée d'un seul trait,
+# tache d'encre au point de convergence, ligne centrale (4ᵉ) à 17° de la
+# verticale alors que la 3ᵉ est plus verticale qu'elle, trois lignes de chaque côté.
+SCAN_LIKE_FAN = (155, 135, 107, 73, 60, 45, 33)
+
+
+def test_item13_tilted_single_stroke_base_and_near_vertical_central_line():
+    result = score(13, fan([(a, 25.0) for a in SCAN_LIKE_FAN], base_tilt=6.0, blob=2.5))
+    general = result.criteria["G"]
+    assert general.score == 1, general.details
+    assert result.criteria["C"].score == 1
+    assert result.measures["radiales_gauche"] == 3 and result.measures["radiales_droite"] == 3
+    assert abs(result.measures["centrale_angle_deg"] - 17.0) < 1.5
+    assert abs(result.measures["base_angle_deg"] - 6.0) < 1.5
+
+
+@pytest.mark.parametrize("tilt, general", [(15.0, 1), (22.0, 0), (26.0, 0)])
+def test_item13_general_base_up_to_20_degrees_from_horizontal(tilt, general):
+    result = score(13, fan([(a, 25.0) for a in np.linspace(30, 150, 7)], base_tilt=tilt))
+    assert result.criteria["G"].score == general, result.criteria["G"].details
+    assert abs(result.measures["base_angle_deg"] - tilt) < 1.5
+
+
+@pytest.mark.parametrize("tilt, general, borderline", [(12.0, 1, False), (19.0, 1, True),
+                                                       (21.0, 0, True), (26.0, 0, False)])
+def test_item13_general_central_line_up_to_20_degrees_from_vertical(tilt, general, borderline):
+    # La 3ᵉ ligne (à 10° de la verticale) est plus verticale que la 4ᵉ, la centrale.
+    angles = (165, 140, 100, 90 - tilt, 40, 28, 16)
+    result = score(13, fan([(a, 25.0) for a in angles]))
+    criterion = result.criteria["G"]
+    assert criterion.score == general, criterion.details
+    assert criterion.borderline == borderline, criterion.details
+    if borderline:
+        assert result.to_review
+
+
+@pytest.mark.parametrize("gap", [(12, 14), (22, 24), (44, 46)])
+@pytest.mark.parametrize("blob", [None, 2.5])
+def test_item13_base_in_several_strokes_fails_general(gap, blob):
+    """Une base en deux traits reste refusée, avec ou sans tache d'encre au
+    point de convergence. Près du centre, la base est lue en deux lignes : la
+    plus longue sert de base, et la convergence n'est plus au tiers central."""
+    seven = [(a, 25.0) for a in np.arange(22.5, 180, 22.5)]
+    result = score(13, fan(seven, base_tilt=6.0, base_gap=gap, blob=blob))
+    assert result.criteria["G"].score == 0, result.criteria["G"].details
+    if gap[1] < 20:
+        assert "plusieurs traits" in result.criteria["G"].details[0]
 
 
 def test_item14_straight_back_and_rising_cylinder():
