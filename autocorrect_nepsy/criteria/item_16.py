@@ -40,6 +40,8 @@ WOBBLE_MM = 0.8  # amplitude d'une ondulation de la main (Motricité A)
 SHARED_SIDE_MM = 2.5  # côté commun à deux régions voisines
 LINK_NEAR_MM = 1.5  # une ligne de liaison passe à moins de cette distance
 LINK_MIN_COVER = 0.7  # Global D : part tracée d'une ligne de liaison
+LINK_COVER = 0.95  # Général : part tracée d'une ligne de liaison
+CORNER_SNAP_MM = 4.0  # Général : coin estimé hors de l'encre, ramené au trait le plus proche
 EQUILATERAL_RANGE = (45.0, 75.0)  # angles d'un triangle « sensiblement équilatéral »
 RIGHT_RANGE = (75.0, 105.0)  # Local F : angle droit
 ON_FIGURE_MM = 2.0  # encre plus éloignée des régions : autre élément
@@ -86,8 +88,15 @@ def score(drawing: Drawing, item: int = 16) -> ItemResult:
     # (positif : dehors ; négatif : n'atteint pas le côté).
     medium_out = [_outside(p, big) for p in (m1, m2, m3)]
     small_out = [_outside(p, medium) for p in (s1, s2, s3)]
-    links = [_link(drawing, corner, end) for corner, end in ((a, s1), (bl, s2), (br, s3))]
-    for (corner, end), (cover, gap) in zip(((a, s1), (bl, s2), (br, s3)), links):
+    pairs = ((a, s1), (bl, s2), (br, s3))
+    links = [_link(drawing, corner, end) for corner, end in pairs]
+    # Général : liaisons mesurées entre les coins réellement tracés. Côtés
+    # du grand triangle un peu bombés : leurs droites se croisent hors de
+    # l'encre, au-delà de la pointe dessinée, et la liaison paraîtrait
+    # interrompue alors que l'enfant a relié les coins.
+    drawn = [(_on_drawing(drawing, corner), _on_drawing(drawing, end)) for corner, end in pairs]
+    general_links = [_link(drawing, corner, end) for corner, end in drawn]
+    for (corner, end), (cover, gap) in zip(drawn, general_links):
         scoring.marks.append(mk.segment(corner, end, f"liaison {cover * 100:.0f} %"))
     redrawn = raster(drawing)
     joints = ([abs(v) for v in medium_out + small_out] + [gap for _, gap in links]
@@ -103,15 +112,16 @@ def score(drawing: Drawing, item: int = 16) -> ItemResult:
     inside_text = (f"coins du moyen à {fmt(max(max(medium_out), 0.0))} au plus hors du grand, du "
                    f"petit à {fmt(max(max(small_out), 0.0))} au plus hors du moyen "
                    f"(≤ {OUTSIDE_MAX_MM.text})")
-    linked = all(cover >= 0.95 for cover, _ in links)
+    linked = all(cover >= LINK_COVER for cover, _ in links)
+    general_linked = all(cover >= LINK_COVER for cover, _ in general_links)
 
     general = scoring["G"]
     general.add(True, "grand, moyen et petit triangles")
     general.add(orientation, orientation_text)
     general.add(inside, inside_text)
-    general.add(linked, "chaque coin du grand triangle relié au coin du petit"
-                f" ({', '.join(f'{c * 100:.0f} %' for c, _ in links)} tracés)")
-    link_gap = max(gap for _, gap in links)
+    general.add(general_linked, "chaque coin du grand triangle relié au coin du petit"
+                f" ({', '.join(f'{c * 100:.0f} %' for c, _ in general_links)} tracés)")
+    link_gap = max(gap for _, gap in general_links)
     general.limit(link_gap, f"plus grand intervalle sur les lignes de liaison {fmt(link_gap)} "
                   f"≤ {JOIN_MM.text}", high=JOIN_MM)
 
@@ -243,6 +253,16 @@ def _outside(point: np.ndarray, triangle: np.ndarray) -> float:
             normal = -normal
         worst = max(worst, float((point - a) @ normal))
     return worst
+
+
+def _on_drawing(drawing: Drawing, corner: np.ndarray) -> np.ndarray:
+    """Coin ramené sur le point d'encre le plus proche s'il est hors du trait
+    et à moins de ``CORNER_SNAP_MM`` ; sinon inchangé."""
+    dist = np.linalg.norm(drawing.points - corner, axis=1)
+    k = int(np.argmin(dist))
+    if LINK_NEAR_MM < dist[k] <= CORNER_SNAP_MM:
+        return drawing.points[k].astype(float)
+    return corner
 
 
 def _link(drawing: Drawing, start: np.ndarray, end: np.ndarray) -> tuple[float, float]:
