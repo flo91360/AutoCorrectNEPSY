@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.5] - 2026-11-06
+<!-- planifikateur:d30cc188-11bc-4859-80d5-d8a169281951 -->
+
+- **figure 16 critère générale** : Le critère Général de l'item 16 est corrigé : un dessin dont les coins sont reliés et qui ne dépasse pas obtient maintenant 1. Toute la suite de tests passe (316 tests, 1 ignoré, celui de l'interface sans écran) et pyflakes ne signale rien. **Cause du 0.** Ce n'était ni le petit triangle « non collé » ni le test de dépassement. Sur le scan, les côtés du grand triangle sont un peu bombés vers l'extérieur. Le logiciel place alors les coins du grand triangle là où se croisent ses côtés redressés, soit 2 à 3 mm au-delà de la pointe réellement tracée. Le bout de ligne entre ce coin calculé et la pointe dessinée n'a pas d'encre : la liaison paraissait tracée à 88–93 % (« liaison 93 % » sur le rapport du scan), sous les 95 % exigés, avec un trou apparent de 2,6 mm au-delà de la limite de 2 mm. **Correction (`autocorrect_nepsy/criteria/item_16.py`).** - Pour le critère Général seulement, chaque coin estimé hors de l'encre est ramené sur le point d'encre le plus proche, dans la limite de 4 mm. La liaison est ensuite mesurée entre les coins réellement dessinés. - La règle elle-même ne change pas : le critère est réussi si chaque coin du grand triangle est relié au coin du petit (ligne tracée à 95 % au moins, trou de 2 mm au plus) et si aucun coin ne dépasse de plus de 2 mm du triangle qui le contient. - Les pourcentages du critère Général et les repères « liaison … % » du rapport utilisent cette nouvelle mesure, donc ils restent cohérents avec la note. - Les autres critères (Motricité B, Global D, Local F) gardent leur mesure d'avant, pour ne pas changer leur cotation. - Les seuils du manuel déclarés pour l'item 16 n'étaient pas en cause et n'ont pas été modifiés. **Tests ajoutés (`tests/test_criteria.py`).** Les dessins synthétiques ont des côtés de grand triangle légèrement bombés, grâce à deux ajouts à `tests/synth.py` : une fonction `bowed` et des options de `nested_triangles` pour réduire ou agrandir le petit triangle et raccourcir les lignes de liaison. - **Coins reliés
+
 ## [0.14.4] - 2026-11-05
 <!-- planifikateur:3cb75d0d-e2b6-484d-8869-2f191cb34aca -->
 

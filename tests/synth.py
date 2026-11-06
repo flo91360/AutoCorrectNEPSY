@@ -97,16 +97,34 @@ def cross_points(center, half_width: float = 6.0, arm: float = 11.0, arms=None):
             (x - w - left, y - w), (x - w, y - w)]
 
 
-def nested_triangles(apex, width: float = 35.5, height: float = 35.5, small_shift=(0.0, 0.0)):
+def nested_triangles(apex, width: float = 35.5, height: float = 35.5, small_shift=(0.0, 0.0),
+                     small_scale: float = 1.0, link_short: float = 0.0):
     """Item 16 : grand triangle, triangle moyen inversé (milieux des côtés),
-    petit triangle (milieux des côtés du moyen, décalé de ``small_shift``)
-    et lignes des coins du grand aux coins du petit."""
+    petit triangle (milieux des côtés du moyen, décalé de ``small_shift`` et
+    réduit ou agrandi autour de son centre de ``small_scale``) et lignes des
+    coins du grand aux coins du petit (arrêtées ``link_short`` mm avant)."""
     a = np.asarray(apex, float)
     bl, br = a + (-width / 2, height), a + (width / 2, height)
     m1, m2, m3 = (a + bl) / 2, (a + br) / 2, (bl + br) / 2
     shift = np.asarray(small_shift, float)
-    s1, s2, s3 = (m1 + m2) / 2 + shift, (m1 + m3) / 2 + shift, (m2 + m3) / 2 + shift
-    return [[a, bl, br], [m1, m2, m3], [s1, s2, s3], [a, s1], [bl, s2], [br, s3]]
+    small = np.array([(m1 + m2) / 2, (m1 + m3) / 2, (m2 + m3) / 2])
+    center = small.mean(axis=0)
+    s1, s2, s3 = center + (small - center) * small_scale + shift
+    links = []
+    for corner, end in ((a, s1), (bl, s2), (br, s3)):
+        direction = (end - corner) / np.linalg.norm(end - corner)
+        links.append([corner, end - link_short * direction])
+    return [[a, bl, br], [m1, m2, m3], [s1, s2, s3], *links]
+
+
+def bowed(start, end, bulge: float, count: int = 40):
+    """Côté tracé à main levée, bombé de ``bulge`` mm en son milieu (vers la
+    gauche du sens de parcours)."""
+    p, q = np.asarray(start, float), np.asarray(end, float)
+    t = np.linspace(0, 1, count)[:, None]
+    d = q - p
+    normal = np.array([d[1], -d[0]]) / np.linalg.norm(d)
+    return p + t * d + np.sin(np.pi * t) * bulge * normal
 
 
 def v_shape(bottom_center, top: float = 18.0, base: float = 18.0, height: float = 31.0,
