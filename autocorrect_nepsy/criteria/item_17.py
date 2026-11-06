@@ -18,7 +18,8 @@ from ..strokes import Drawing
 from . import marks as mk
 from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .polygons import (EDGE_OFFSET_MM, Polygon, away_from, corner_polygon, fit_polygon,
-                       overshoot, raster, regions, silhouette, turn, wavy_changes)
+                       overshoot, raster, regions, silhouette, turn, wavy_changes,
+                       without_short_sides)
 from .shapes import EXTRA_ELEMENT_MM
 
 # Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
@@ -47,6 +48,7 @@ WOBBLE_MM = 0.8  # amplitude d'une ondulation de la main (Motricité A)
 NEAR_RIGHT_DEG = 10.0  # Général : angle « proche de 90° »
 PARALLEL_MAX_DEG = 12.0  # côtés parallèles d'un trapèze
 ON_OUTLINE_MM = 2.0  # encre plus éloignée des régions : autre élément
+CHAMFER_MM = 2.5  # côté plus court de la silhouette : coin arrondi coupé, pas un côté
 
 
 @dataclass
@@ -123,6 +125,7 @@ def score(drawing: Drawing, item: int = 17) -> ItemResult:
     shape = (corner_polygon(outline, SILHOUETTE_EPSILON_MM, -EDGE_OFFSET_MM)
              if outline is not None else None)
     if shape is not None:
+        shape = without_short_sides(shape, CHAMFER_MM)
         # Les coins rentrants sont les croisements des lignes intérieures : elles
         # s'y prolongent normalement.
         over = [overshoot(drawing, shape, k) for k in range(len(shape.vertices))

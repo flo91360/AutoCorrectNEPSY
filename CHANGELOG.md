@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.5] - 2026-11-06
+<!-- planifikateur:cc61a266-b78c-49a1-9b3a-fd4ead451c80 -->
+
+- **figure 17 critère motricité B** : Item 17 corrigé : sur la capture jointe, Motricité B affiche maintenant un dépassement d'environ 1,75 à 1,8 mm (2,3 à 2,4 mm avant) et le critère est réussi. Le seuil de 2 mm du manuel n'a pas changé. La suite de tests passe (317 réussis, 1 ignoré). Limite : la pièce jointe est une capture d'écran basse résolution (environ 3,8 pixels par mm), pas le scan original. Je n'ai donc pas obtenu exactement 1,6 mm ; la valeur reste à moins de 0,2 mm de celle de l'ergothérapeute. Il faudrait refaire la vérification sur le vrai scan. **Cause trouvée** - La ligne extérieure gauche du V est un peu incurvée et le coin en bas à gauche est arrondi. - L'outil place le coin à la rencontre des côtés ajustés en lignes droites. Ce coin calculé tombait environ 1,2 mm à droite de l'endroit où la ligne intérieure croise réellement la base. - L'outil mesurait la distance entre la pointe du dépassement et ce coin calculé. Ce décalage s'ajoutait donc à la longueur du dépassement. - Mesurée depuis la droite de la base, la pointe est à 1,63 mm : c'est la mesure de l'ergothérapeute à la règle. **Correction (`criteria/polygons.py`, fonction `overshoot`, utilisée seulement par l'item 17)** - Le dépassement se mesure le long du trait, depuis l'endroit où il franchit la droite d'un côté jusqu'à sa pointe. Ce passage n'est retenu que s'il est net (au moins 30° par rapport au côté) et si le côté y est réellement dessiné. Si aucun passage n'est trouvé, l'ancienne mesure s'applique et ne peut pas être dépassée. - Les petits côtés parasites de moins de 2,5 mm, qui coupent parfois un coin arrondi en deux, sont fusionnés en un seul coin. - La recherche autour du coin est élargie de la distance entre le coin calculé et le tracé, pour ne pas perdre la pointe d'un long dépassement. L'item 18 a sa propre mesure et n'est pas touché. **Tests** - Dans `tests/synth.py`, un nouveau dessin `v_overshoot` reproduit la situation : un V dont la ligne extérieure gauche est droite ou incurvée, avec un dépassement au coin 
+
 ## [0.14.4] - 2026-11-05
 <!-- planifikateur:3cb75d0d-e2b6-484d-8869-2f191cb34aca -->
 
