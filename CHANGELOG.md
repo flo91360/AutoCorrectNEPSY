@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.7] - 2026-11-06
+<!-- planifikateur:622367a2-e7cc-492a-b015-96634b80941d -->
+
+- **figure 20 critère Global D** : Global D de l'item 20 mesure maintenant l'angle entre les deux segments qui joignent les pointes des pétales latéraux. Les pétales ne sont plus comparés un par un à l'horizontale. Je n'ai pas pu vérifier que le cas de la carte est coté réussi : il ne se trouve pas dans le dépôt. D'après ma lecture de la capture, l'outil y trouverait environ 48°, au-dessus de la limite de 45° que vous lisez au rapporteur. Le critère serait alors coté échoué mais signalé « à vérifier », et non réussi. Les tests passent (327 réussis, 1 ignoré, pyflakes sans erreur). **La nouvelle mesure** - L'outil retrouve les quatre pétales latéraux (tous sauf les deux pétales verticaux). Il relie la pointe en haut à gauche à celle en bas à droite, et la pointe en haut à droite à celle en bas à gauche. - Il mesure l'angle entre ces deux segments du côté gauche, qui est égal à celui de droite, comme au rapporteur. La plage reste de 20° à 45°. - La ligne du rapport devient « angle de N° entre les segments qui joignent les pointes des pétales latéraux opposés (20° à 45°) ». Les deux segments et l'angle sont aussi dessinés sur le rapport. - S'il n'y a pas exactement quatre pétales latéraux, le critère est échoué avec un message qui l'explique. - Les vérifications des extrémités intérieures, de l'axe vertical et des pointes arrondies sont inchangées. **La marge « à vérifier »** Pour cette mesure seulement, la marge passe de 2° à 4°. À la lecture au rapporteur (2°) s'ajoute le placement à l'œil des quatre pointes, qui fait tourner chacun des deux segments d'environ 1°. Concrètement : - de 41° à 45° et de 20° à 24°, le critère est réussi mais signalé « à vérifier » ; - au-dessus de 45° jusqu'à 49°, et de 16° à moins de 20°, il est échoué et signalé « à vérifier » ; - au-delà de ces valeurs, la note ne change pas et n'est pas signalée. **Point à valider : le modèle synthétique des tests** Avec des pétales espacés régulièrement, une fleur parfaite forme un angle de 60° et aurait été cotée échouée. J'ai donc m
+
 ## [0.14.6] - 2026-11-06
 <!-- planifikateur:d30cc188-11bc-4859-80d5-d8a169281951 -->
 
