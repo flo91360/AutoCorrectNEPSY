@@ -330,6 +330,57 @@ def test_item13_missing_radials_and_short_lines():
     assert result["E"] == 0 and result["F"] == 0 and result["C"] == 1
 
 
+def scribbled_fan(gap=0.0, pastille=True):
+    """Base un peu inclinée, sept lignes radiales serrées (24 à 125°) et, si
+    ``pastille``, griffonnage colorié sur la base des lignes radiales. La ligne
+    à 98° s'arrête à ``gap`` mm du point de convergence."""
+    image = canvas()
+    meet = np.array([28.0, 56.0])
+    along = np.array([np.cos(np.radians(6)), np.sin(np.radians(6))])
+    polyline(image, [meet - 22 * along, meet + 30 * along])
+    for i, angle in enumerate((125, 110, 98, 72, 52, 38, 24)):
+        up = np.array([np.cos(np.radians(angle)), -np.sin(np.radians(angle))])
+        polyline(image, [meet + (gap if angle == 98 else 0.0) * up, meet + 25 * up], seed=i)
+    if pastille:
+        dot(image, meet - (0, 0.6), 2.5)
+        scribble = [(-2, -0.3), (1.5, -1.5), (-1.5, -1.2), (2, -0.2), (-1, -1.8), (1.8, -1)]
+        polyline(image, [meet + p for p in scribble], width_mm=0.5)
+    return image
+
+
+@pytest.mark.parametrize("pastille", [True, False])
+def test_item13_scribbled_convergence_is_not_a_gap(pastille):
+    # Les lignes radiales se fondent dans la pastille et entre elles : la ligne
+    # lue s'arrête 2 à 4 mm au-dessus de la base, mais l'encre la rejoint.
+    # L'ancienne mesure y voyait un intervalle de 4,1 à 4,4 mm.
+    result = score(13, scribbled_fan(pastille=pastille))
+    assert scores(result)["B"] == 1, result.criteria["B"].details
+    assert result.measures["jonction_max_mm"] <= 0.5
+
+
+@pytest.mark.parametrize("pastille", [True, False])
+@pytest.mark.parametrize("gap", [3.5, 4.0])
+def test_item13_real_gap_above_the_base_still_fails_motricite_b(gap, pastille):
+    # Intervalle réel entre la fin de l'encre de la ligne et le bord de la base :
+    # l'écart dessiné, moins l'épaisseur des traits (~0,6 mm à 1,1 mm).
+    result = score(13, scribbled_fan(gap, pastille=pastille))
+    assert scores(result)["B"] == 0, result.criteria["B"].details
+    assert gap - 1.3 <= result.measures["jonction_max_mm"] <= gap
+
+
+@pytest.mark.parametrize("gap", [0.0, 3.5])
+def test_item13_vertical_line_gap_in_a_plain_fan(gap):
+    image = canvas()
+    polyline(image, [(7, 58), (57, 58)])
+    for i, angle in enumerate(np.radians(np.arange(22.5, 180, 22.5))):
+        up = np.array([np.cos(angle), -np.sin(angle)])
+        start = np.array([32.0, 58.0]) + (gap if i == 3 else 0.0) * up
+        polyline(image, [start, np.array([32.0, 58.0]) + 25 * up], seed=i)
+    result = score(13, image)
+    assert scores(result)["B"] == (0 if gap else 1), result.criteria["B"].details
+    assert result.measures["jonction_max_mm"] >= gap - 1.3
+
+
 def test_item13_off_center_convergence_fails_general():
     seven = [(a, 25.0) for a in np.arange(22.5, 180, 22.5)]
     result = scores(score(13, fan(seven, center=14, base=(5, 59))))

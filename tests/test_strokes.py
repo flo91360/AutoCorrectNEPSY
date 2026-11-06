@@ -131,3 +131,13 @@ def test_aligned_pieces_form_one_line_up_to_a_10_mm_gap(gap, count):
     assert len(lines) == count
     if count == 1:
         assert lines[0].interruptions == 1
+
+
+def test_ink_depth_tells_a_line_from_a_filled_patch():
+    image = polyline(canvas(), [(10, 20), (50, 20)])
+    dot(image, (30, 50), 4.0)
+    drawing = drawing_of(image)
+    line, patch, blank = drawing.ink_depth(np.array([(30, 20), (30, 50), (30, 35)]))
+    assert 0.1 < line < 0.4  # demi-épaisseur d'un trait de 0,45 mm
+    assert patch > 1.5  # au milieu d'un rond colorié de 4 mm
+    assert blank == 0

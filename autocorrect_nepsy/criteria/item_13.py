@@ -50,6 +50,9 @@ RADIAL_NEAR_MM = 8.0  # bas d'une ligne radiale près de la ligne de base
 CENTRAL_MAX_DEG = 25.0  # ligne centrale « relativement verticale » (hors 7 lignes radiales)
 CONVERGENCE_ZONE_MM = 3.0  # tache d'encre au point de convergence, ignorée (A, base de G)
 DOUBLED_MAX_MM = 3.0  # base repassée : ce n'est plus un seul trait
+GAP_STEP_MM = 0.1  # pas du parcours entre le bas d'une ligne radiale et la base
+GAP_MARGIN_MM = 3.0  # parcours prolongé au-delà du pied (base courbée ou inclinée)
+FILLED_DEPTH = 1.0  # zone coloriée (pastille) : bord de l'encre à plus d'une épaisseur de trait
 
 
 def score(drawing: Drawing, item: int = 13) -> ItemResult:
@@ -97,7 +100,7 @@ def score(drawing: Drawing, item: int = 13) -> ItemResult:
     for line in radials:
         scoring.marks.append(mk.segment(*sorted(line.ends, key=lambda p: p[1]), fmt(line.length)))
 
-    junctions = [(_join_gap(line, base), _bottom(line)) for line in radials]
+    junctions = [(_join_gap(line, base, drawing), _bottom(line)) for line in radials]
     worst, worst_point = max(junctions, key=lambda j: j[0])
     scoring.measures["jonction_max_mm"] = worst
     if worst > 0.5:
@@ -240,17 +243,60 @@ def _check_straight(checks: Checks, marks: list, lines: list[StraightLine],
     marks.extend(mk.bande(line, at="bout") for line in drawn)
 
 
-def _join_gap(radial: StraightLine, base: StraightLine) -> float:
+def _join_gap(radial: StraightLine, base: StraightLine, drawing: Drawing) -> float:
     """Intervalle (bas de la ligne radiale au-dessus de la base) ou dépassement
-    (longueur de la ligne radiale sous la base), en mm."""
+    (longueur de la ligne radiale sous la base), en mm.
+
+    Au point de convergence, les lignes radiales se fondent entre elles et
+    dans la base (tache d'encre, « pastille » coloriée) : la ligne lue s'y
+    arrête avant la base alors que le trait la rejoint. L'intervalle est donc
+    la distance entre la fin de l'encre de la ligne radiale et le bord de la
+    base, parcourue dans le prolongement de la ligne radiale (nulle si l'encre
+    est continue). Sous la base, la partie de la ligne lue dans une zone
+    coloriée n'est pas un dépassement."""
     normal = np.array([-base.direction[1], base.direction[0]])
     if normal[1] > 0:
         normal = -normal  # vers le haut
-    height = float((_bottom(radial) - base.center) @ normal)
+    bottom = _bottom(radial)
+    height = float((bottom - base.center) @ normal)
     if height >= 0:
-        return height
+        blank = _blank_to_base(radial, base, normal, drawing)
+        return height if blank is None else min(height, blank)
     sine = max(np.sin(np.radians(geo.angle_between(radial.direction, base.direction))), 0.2)
-    return -height / sine
+    overshoot = -height / sine
+    # Ligne lue qui finit dans une zone coloriée sous la base (pastille) : seule
+    # compte la partie tracée d'un trait, pas celle perdue dans la pastille.
+    foot = _foot(radial, base)
+    samples = np.linspace(foot, bottom, max(2, int(np.linalg.norm(bottom - foot) / GAP_STEP_MM)))
+    thickness = 2 * float(np.median(drawing.ink_depth(base.points)))
+    filled = drawing.ink_depth(samples) > FILLED_DEPTH * thickness
+    return overshoot * float(np.mean(~filled)) if filled[-3:].any() else overshoot
+
+
+def _blank_to_base(radial: StraightLine, base: StraightLine, normal: np.ndarray,
+                   drawing: Drawing) -> float | None:
+    """Distance (mm) entre la fin de l'encre de la ligne radiale et le bord du
+    trait de la base, parcourue dans le prolongement de la ligne radiale ;
+    ``None`` sans masque d'encre ou si le parcours n'atteint pas la base."""
+    if drawing.ink is None:
+        return None
+    down = radial.direction if radial.direction[1] > 0 else -radial.direction
+    bottom = _bottom(radial)
+    reach = float(np.linalg.norm(_foot(radial, base) - bottom)) + GAP_MARGIN_MM
+    steps = np.arange(0.0, reach + GAP_STEP_MM, GAP_STEP_MM)
+    samples = bottom + np.outer(steps, down)
+    # Bord supérieur du trait de la base : son axe, à une demi-épaisseur réelle
+    # d'encre (les points lus de la base remontent dans la tache de convergence).
+    half = float(np.median(drawing.ink_depth(base.points)))
+    on_base = np.nonzero((samples - base.center) @ normal <= half)[0]
+    if not len(on_base):
+        return None
+    blank = ~drawing.on_ink(samples[:on_base[0]])
+    if not blank.any():
+        return 0.0  # encre continue jusqu'à la base
+    # Dès que l'encre s'interrompt, tout le reste du parcours jusqu'à la base
+    # est un intervalle, même s'il croise l'encre d'une ligne radiale voisine.
+    return float((len(blank) - int(np.argmax(blank))) * GAP_STEP_MM)
 
 
 def _top(line: StraightLine) -> np.ndarray:
