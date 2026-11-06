@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.7] - 2026-11-06
+<!-- planifikateur:a8e1a783-5bf3-4ff9-8779-acf76efc16f3 -->
+
+- **figure 13 critère motricité B** : Figure 13, Motricité B : un griffonnage (« pastille ») à la base des traits radiaux n'est plus compté comme un intervalle. Sur un dessin synthétique qui reproduit le cas, la note passe de 0 à 1, et un vrai écart de plus de 2 mm donne toujours 0. Le seuil de 2 mm du manuel n'a pas changé. La suite complète passe (326 tests, pyflakes sans erreur). Le scan joint n'a pas été rejoué : il n'est pas dans le dépôt. **Cause du 0.** Au point de convergence, l'encre des traits radiaux se fond avec celle des traits voisins, de la base et de la pastille. Dans cette zone, l'outil ne retrouve plus le trait : la ligne qu'il lit s'arrête 2 à 5 mm au-dessus de la base, alors que l'encre la rejoint. L'ancienne mesure prenait la hauteur de cette fin de ligne au-dessus de la base et trouvait 4,1 à 4,4 mm, d'où le 0. Le défaut apparaît dès que l'éventail est serré ou que la base est un peu inclinée, même sans griffonnage. **Correction** (`criteria/item_13.py`, avec une petite mesure ajoutée dans `strokes.py`) : - **Intervalle :** l'outil suit le prolongement du trait radial jusqu'au bord du trait de base, en regardant l'encre réellement présente. Si l'encre est continue, l'intervalle vaut 0. Sinon, il vaut tout l'espace entre la fin de l'encre du trait et le bord de la base, même si le parcours croise un trait voisin. La mesure du rapport correspond donc à la distance réelle entre les deux traits. - **Dépassement sous la base :** si la ligne lue finit dans une zone coloriée, seule la partie tracée d'un trait fin compte, pas celle perdue dans la pastille. Un dépassement en trait fin est mesuré comme avant. **Effets sur les mesures existantes :** - Comme l'intervalle est mesuré entre les bords d'encre et non plus depuis le centre des traits, un vrai écart paraît environ 0,5 à 1 mm plus court. Exemple : un écart dessiné de 3,5 mm est mesuré entre 2,4 et 2,9 mm, donc toujours au-dessus de 2 mm et coté 0. - Seules deux cotations de l'item 13 changent dans l'instantané (`tests/instantane_cotat
+
 ## [0.14.6] - 2026-11-06
 <!-- planifikateur:d30cc188-11bc-4859-80d5-d8a169281951 -->
 
