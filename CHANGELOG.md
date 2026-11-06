@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.9] - 2026-11-06
+<!-- planifikateur:36b97a9b-2af0-4415-b6a8-af7bdec19096 -->
+
+- **figure 13 note général** : Le conflit dans `tests/instantane_cotation.json` est résolu et il ne reste aucun marqueur de conflit. Les tests de cotation et de l'instantané passent (209 tests), mais je n'ai pas relancé la suite complète après la fusion. **Cause du conflit** : les deux branches modifiaient les deux mêmes lignes de l'instantané, celles de la copie du modèle 13 tracée avec un tremblement (0,6 et 1,5 mm). - Sur `main`, la Motricité B de ces copies passait de 0 à 1. - Sur cette branche, le critère Général passait de 0 à 1. **Résolution** : plutôt que de choisir une version à la main, j'ai régénéré l'instantané à partir du code fusionné (`python tests/test_instantane.py`). Par rapport à `main`, seules ces deux lignes changent, et elles gardent les deux modifications : - `13/13/0.6` : `G1 A1~ B1 C1 D1 E1 F1 ⚠` - `13/13/1.5` : `G1 A0 B1 C1 D0 E1~ F1 ⚠` **Correction de la carte, sur le code fusionné** : le critère Général de l'item 13 vaut toujours 1 sur le scan joint, aux trois échelles testées. Sur ce scan, la Motricité B passe maintenant aussi à 1, ce qui vient du changement arrivé sur `main`. Rappel de la correction : avec sept lignes radiales, la ligne centrale est la 4ᵉ de l'éventail et doit être à 20° au plus de la verticale. La tache d'encre au point de convergence ne compte plus comme une coupure de la base. Une base en plusieurs traits, ou inclinée de plus de 20°, reste cotée 0. Je n'ai lancé aucune commande Git et je n'ai pas touché à CHANGELOG.md.
+
 ## [0.14.8] - 2026-11-06
 <!-- planifikateur:a8e1a783-5bf3-4ff9-8779-acf76efc16f3 -->
 
