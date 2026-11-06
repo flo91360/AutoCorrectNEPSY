@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.7] - 2026-11-06
+<!-- planifikateur:36b97a9b-2af0-4415-b6a8-af7bdec19096 -->
+
+- **figure 13 note général** : Le critère Général de l'item 13 vaut maintenant 1 sur le scan joint, au lieu de 0. Il ne change que pour ce critère : les autres critères gardent la même note. J'ai testé le scan à trois échelles possibles (base de 45, 50 et 60 mm), avec le même résultat. Les 335 tests passent. **Les deux causes, toutes deux présentes sur le scan :** 1. **Ligne centrale mal repérée.** L'outil prenait comme ligne centrale la ligne la plus verticale. Sur ce dessin, c'est la 3ᵉ (à 16° de la verticale) et non la 4ᵉ (à 17°). Il comptait donc 2 lignes à gauche et 4 à droite. Avec sept lignes, la ligne centrale est maintenant la 4ᵉ de l'éventail (trois de chaque côté), comme le faisait déjà le critère Global C. Sa verticalité est vérifiée à part : 20° au plus, avec le signalement « à vérifier » quand la mesure est proche du seuil. 2. **Fausse coupure de la base.** La tache d'encre au point de convergence coupait la base à la lecture (1 interruption de 1,4 mm). Elle pouvait aussi la faire passer pour un trait repassé. Pour décider si la base est d'un seul trait, l'outil ignore maintenant cette zone de 3 mm, comme il le faisait déjà pour la Motricité A. Une coupure ailleurs sur la base compte toujours. **Seuils (`item_13.py`)** - Ligne centrale : le seuil de 20° existant, renommé `CENTRAL_DEG`, est déclaré pour les critères G et C. Sa valeur ne change pas, donc Global C reste identique. - Base : le seuil de 20° par rapport à l'horizontale existait déjà pour le critère G. - `autocorrect-nepsy seuils --item 13` ne montre aucune contradiction. Le seuil de 10° de Global D, plus strict, concerne un autre critère. - J'ai gardé les conditions du manuel qui étaient déjà vérifiées pour le critère G (convergence au tiers central, écart de 5 mm au plus entre les lignes d'un même côté). La carte n'en parle pas ; elles sont respectées sur le scan. **Rapport** : les mesures existantes restent affichées. Deux mesures s'ajoutent, `base_interruptions` et `base_repassee_mm`, et le motif d'un refus indique aus
+
 ## [0.14.6] - 2026-11-06
 <!-- planifikateur:d30cc188-11bc-4859-80d5-d8a169281951 -->
 

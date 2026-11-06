@@ -2,8 +2,10 @@
 
 Seuils repris du manuel NEPSY-II (Copie de figures), reformulés.
 
-Les lignes radiales sont les lignes qui partent de la ligne de base ; la plus
-verticale est la ligne centrale, les autres sont de part et d'autre.
+Les lignes radiales sont les lignes qui partent de la ligne de base. Avec sept
+lignes radiales, la ligne centrale est la 4ᵉ dans l'ordre de l'éventail (trois
+de part et d'autre), même si une voisine est plus verticale qu'elle ; sinon,
+c'est la plus verticale.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 
 from .. import geometry as geo
-from ..strokes import Drawing, StraightLine
+from ..strokes import INTERRUPTION_MM, Drawing, StraightLine
 from . import marks as mk
 from .base import Checks, ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from .shapes import check_lines, extra_elements, intersection, review_notes
@@ -23,8 +25,8 @@ JOIN_MM = threshold(2.0, "B", "intervalle ou dépassement entre une ligne radial
                     "au plus")
 PER_SIDE = threshold(3, "GC", "lignes radiales de chaque côté de la ligne centrale, exactement",
                      "nombre")
-GLOBAL_CENTRAL_DEG = threshold(20.0, "C", "écart à la verticale de la ligne centrale (4ᵉ des 7 "
-                               "lignes radiales), au plus", "deg")
+CENTRAL_DEG = threshold(20.0, "GC", "écart à la verticale de la ligne centrale (4ᵉ des 7 "
+                        "lignes radiales), au plus", "deg")
 GENERAL_BASE_DEG = threshold(20.0, "G", "écart de la base à l'horizontale, au plus", "deg")
 CONVERGENCE_THIRD = (threshold(1 / 3, "GD", "position du point de convergence sur la base, au "
                                "moins (tiers central)", "part"),
@@ -45,8 +47,8 @@ LOCAL_MIN_RADIAL_MM = threshold(15.0, "F", "longueur de la plus courte ligne rad
 BASE_MAX_DEG = 30.0  # au-delà, ce n'est plus la ligne de base
 RADIAL_MIN_DEG = 10.0  # une ligne radiale s'élève au-dessus de la base
 RADIAL_NEAR_MM = 8.0  # bas d'une ligne radiale près de la ligne de base
-CENTRAL_MAX_DEG = 25.0  # ligne centrale « relativement verticale »
-CONVERGENCE_ZONE_MM = 3.0  # tache d'encre au point de convergence, ignorée
+CENTRAL_MAX_DEG = 25.0  # ligne centrale « relativement verticale » (hors 7 lignes radiales)
+CONVERGENCE_ZONE_MM = 3.0  # tache d'encre au point de convergence, ignorée (A, base de G)
 DOUBLED_MAX_MM = 3.0  # base repassée : ce n'est plus un seul trait
 
 
@@ -70,12 +72,17 @@ def score(drawing: Drawing, item: int = 13) -> ItemResult:
     radials = [l for l in lines if l is not base and _is_radial(l, base)]
     if not radials:
         return fail("aucune ligne radiale reconnue sur la ligne de base")
-    central = min(radials, key=lambda l: l.angle_to_vertical())
-    if central.angle_to_vertical() > CENTRAL_MAX_DEG:
-        central = None
-    left = [l for l in radials if l is not central and _top(l)[0] < _bottom(l)[0]]
-    right = [l for l in radials if l is not central and _top(l)[0] >= _bottom(l)[0]]
     feet = {id(l): _foot(l, base) for l in radials}
+    seven = len(radials) == 2 * PER_SIDE + 1
+    if seven:
+        fan = sorted(radials, key=lambda l: _polar_angle(l, feet[id(l)]))
+        central, right, left = fan[PER_SIDE], fan[:PER_SIDE], fan[PER_SIDE + 1:]
+    else:
+        central = min(radials, key=lambda l: l.angle_to_vertical())
+        if central.angle_to_vertical() > CENTRAL_MAX_DEG:
+            central = None
+        left = [l for l in radials if l is not central and _top(l)[0] < _bottom(l)[0]]
+        right = [l for l in radials if l is not central and _top(l)[0] >= _bottom(l)[0]]
     meeting = np.median(np.array(list(feet.values())), axis=0)
     _check_straight(scoring["A"], scoring.marks, lines, meeting)
     position = {id(l): base.position(feet[id(l)]) - base.t0 for l in radials}
@@ -99,20 +106,28 @@ def score(drawing: Drawing, item: int = 13) -> ItemResult:
                        f"la base {fmt(worst)} ≤ {JOIN_MM.text}", high=JOIN_MM)
 
     layout_ok = central is not None and len(left) == PER_SIDE and len(right) == PER_SIDE
-    layout_text = (f"{len(left)} à gauche, {len(right)} à droite, ligne centrale "
-                   f"{'verticale' if central is not None else 'absente'}")
+    where = "au milieu" if seven else "verticale" if central is not None else "absente"
+    layout_text = f"{len(left)} à gauche, {len(right)} à droite, ligne centrale {where}"
     convergence = float(np.median(list(position.values()))) / max(base.length, 1e-6)
     scoring.measures["convergence_sur_base"] = convergence
-    continuous = base.interruptions == 0 and base.doubled_length < DOUBLED_MAX_MM
+    breaks, doubled = _base_strokes(base, meeting)
+    scoring.measures["base_interruptions"] = breaks
+    scoring.measures["base_repassee_mm"] = doubled
+    continuous = breaks == 0 and doubled < DOUBLED_MAX_MM
 
     general = scoring["G"]
     general.add(continuous, "ligne de base d'un seul trait" if continuous
-                else f"ligne de base en plusieurs traits ({base.interruptions} interruption(s))")
+                else f"ligne de base en plusieurs traits ({breaks} interruption(s), "
+                f"repassée sur {fmt(doubled)})")
     general.limit(base_angle, f"base à {base_angle:.0f}° de l'horizontale "
                   f"(≤ {GENERAL_BASE_DEG.text})",
                   high=GENERAL_BASE_DEG, unit="deg")
     general.add(layout_ok, "trois lignes radiales de chaque côté d'une ligne centrale "
                 f"({layout_text})")
+    if seven:
+        tilt = central.angle_to_vertical()
+        general.limit(tilt, f"ligne centrale (4ᵉ ligne radiale) à {tilt:.0f}° de la verticale "
+                      f"(≤ {CENTRAL_DEG.text})", high=CENTRAL_DEG, unit="deg")
     first, last = CONVERGENCE_THIRD
     general.limit(convergence, f"convergence au {convergence * 100:.0f} % de la base "
                   "(tiers central : 33 à 67 %)", low=first, high=last, unit="part")
@@ -159,7 +174,7 @@ def _check_global_c(checks: Checks, measures: dict, radials: list[StraightLine],
     """Global C : seulement trois lignes radiales de chaque côté d'une ligne
     centrale relativement verticale. Avec sept lignes radiales, la ligne
     centrale est la 4ᵉ dans l'ordre de l'éventail (trois de part et d'autre),
-    acceptée jusqu'à ``GLOBAL_CENTRAL_DEG`` de la verticale, même si une
+    acceptée jusqu'à ``CENTRAL_DEG`` de la verticale, même si une
     voisine est plus verticale qu'elle."""
     if len(radials) != 2 * PER_SIDE + 1:
         checks.add(layout_ok, f"seulement trois lignes radiales de chaque côté d'une ligne "
@@ -171,7 +186,30 @@ def _check_global_c(checks: Checks, measures: dict, radials: list[StraightLine],
     checks.add(True, "seulement trois lignes radiales de chaque côté d'une ligne centrale "
                f"({2 * PER_SIDE + 1} lignes radiales)")
     checks.limit(angle, f"ligne centrale (4ᵉ ligne radiale) à {angle:.0f}° de la verticale "
-                 f"(≤ {GLOBAL_CENTRAL_DEG.text})", high=GLOBAL_CENTRAL_DEG, unit="deg")
+                 f"(≤ {CENTRAL_DEG.text})", high=CENTRAL_DEG, unit="deg")
+
+
+def _base_strokes(base: StraightLine, meeting: np.ndarray) -> tuple[int, float]:
+    """Interruptions de la ligne de base et longueur (mm) repassée à côté
+    d'elle-même (Général), sans tenir compte de la tache d'encre du point de
+    convergence (``meeting``) : là, les lignes radiales qui se croisent coupent
+    la base en morceaux à la lecture du tracé alors qu'elle a été tracée d'un
+    seul trait."""
+    spans = sorted((float(t.min()), float(t.max())) for t in
+                   ((piece - base.center) @ base.direction for piece in base.pieces))
+    at = base.position(meeting)
+    count, reach = 0, spans[0][1]
+    for start, end in spans[1:]:
+        # coupure qui touche la tache (une ligne radiale presque à plat peut
+        # aussi y prendre à la base un bout de trait)
+        hidden = at - CONVERGENCE_ZONE_MM <= start and reach <= at + CONVERGENCE_ZONE_MM
+        if start - reach > INTERRUPTION_MM and not hidden:
+            count += 1
+        reach = max(reach, end)
+    pieces = [p[np.linalg.norm(p - meeting, axis=1) > CONVERGENCE_ZONE_MM] for p in base.pieces]
+    pieces = [p for p in pieces if len(p) >= 2]
+    doubled = StraightLine(pieces, base.stroke_width).doubled_length if pieces else 0.0
+    return count, float(doubled)
 
 
 def _polar_angle(line: StraightLine, foot: np.ndarray) -> float:
