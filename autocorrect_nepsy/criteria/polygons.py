@@ -33,6 +33,10 @@ EDGE_OFFSET_MM = 1.5 / PX_PER_MM
 SHORT_SIDE_FRACTION = 0.4  # côté plus court : coin mal fermé, fusionné
 WEDGE_TOLERANCE_MM = 0.3  # encre au-delà d'un coin : dépassement
 PROLONG_DEG = 30.0  # encre dans le prolongement d'un côté, à cet angle près : dépassement
+# Dépassement mesuré le long du trait depuis la droite d'un côté qu'il franchit.
+FOLLOW_STEP_MM = 0.05  # pas du suivi le long du trait
+CROSSING_MIN_DEG = 30.0  # trait plus parallèle au côté : il le longe, ne le franchit pas
+SIDE_INK_MM = (0.6, 1.5)  # encre du côté franchi, de part du franchissement vers son autre bout
 
 
 @dataclass
@@ -266,13 +270,94 @@ def _to_segment(points: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def overshoot(drawing: Drawing, poly: Polygon, k: int, reach: float = 3.0) -> float:
     """Dépassement (mm) au coin ``k`` : encre qui, près du coin, sort de l'angle
     formé par les deux côtés (trait prolongé au-delà du coin). Une autre ligne
-    qui arrive au coin par l'intérieur de l'angle n'est pas un dépassement."""
+    qui arrive au coin par l'intérieur de l'angle n'est pas un dépassement.
+
+    Chaque point qui sort de l'angle compte pour sa distance aux deux côtés,
+    ou, si c'est plus court, pour la longueur du trait qui le relie à la droite
+    d'un côté qu'il franchit (mesure à la règle depuis la ligne croisée). Quand
+    un côté est un peu incurvé ou le coin arrondi, le coin recalculé (rencontre
+    des côtés ajustés) tombe à côté du croisement dessiné : la distance à ce
+    coin compterait aussi ce décalage, pas la longueur du dépassement."""
     n = len(poly.vertices)
     a, v, c = poly.vertices[k - 1], poly.vertices[k], poly.vertices[(k + 1) % n]
-    beyond = _beyond_wedge(drawing.points, a, v, c, reach)
+    points = drawing.points
+    # Coin arrondi : le coin recalculé est loin du contour, et d'autant de la
+    # pointe d'un dépassement.
+    reach += float(np.linalg.norm(poly.outline - v, axis=1).min())
+    near = np.flatnonzero(np.linalg.norm(points - v, axis=1) <= reach)
+    beyond = near[_outside_wedge(points[near], a, v, c)]
     if not len(beyond):
         return 0.0
-    return float(np.minimum(_to_segment(beyond, a, v), _to_segment(beyond, v, c)).max())
+    away = np.minimum(_to_segment(points[beyond], a, v), _to_segment(points[beyond], v, c))
+    sides = [(v, a, c), (v, c, a)]  # droite (v, a) côté intérieur vers c, et inversement
+    return float(max(min(d, _length_past(drawing, int(i), sides, d))
+                     for i, d in zip(beyond, away)))
+
+
+def _length_past(drawing: Drawing, index: int, sides, limit: float) -> float:
+    """Longueur (mm) du trait entre le point ``index`` du dessin et l'endroit
+    où il franchit la droite d'un des côtés ``sides`` (point, autre point de
+    la droite, point du côté intérieur) dont il est à l'extérieur ; seuls
+    comptent les franchissements à plus de ``CROSSING_MIN_DEG`` de la droite.
+    ``inf`` si le trait n'en franchit aucune à moins de ``limit``."""
+    start = 0
+    for stroke in drawing.strokes:
+        if index < start + len(stroke.points):
+            break
+        start += len(stroke.points)
+    else:
+        return np.inf
+    own, i = stroke.points, index - start
+    if len(own) < 2:
+        return np.inf
+    pts = np.vstack([own, own[:1]]) if stroke.closed else own
+    cum = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))])
+    total = float(cum[-1])
+    point = own[i]
+    best = np.inf
+    for sign in (1.0, -1.0):
+        arcs = np.arange(0.0, min(limit, total) + FOLLOW_STEP_MM, FOLLOW_STEP_MM)
+        positions = cum[i] + sign * arcs
+        if stroke.closed:
+            positions %= total
+        else:
+            keep = (positions >= 0) & (positions <= total)
+            arcs, positions = arcs[keep], positions[keep]
+        if len(arcs) < 2:
+            continue
+        samples = np.column_stack([np.interp(positions, cum, pts[:, 0]),
+                                   np.interp(positions, cum, pts[:, 1])])
+        for origin, other, inside in sides:
+            direction = geo.unit(other - origin)
+            normal = np.array([-direction[1], direction[0]])
+            if normal @ (inside - origin) < 0:
+                normal = -normal  # vers l'intérieur de l'angle
+            if normal @ (point - origin) >= 0:
+                continue  # du bon côté de cette droite
+            crossed = np.flatnonzero((samples - origin) @ normal >= 0)
+            if not len(crossed) or crossed[0] == 0:
+                continue
+            j = int(crossed[0])
+            angle = geo.angle_between(samples[j] - samples[j - 1], direction)
+            if (min(angle, 180.0 - angle) >= CROSSING_MIN_DEG
+                    and _side_drawn(drawing, samples[j], direction, normal)):
+                best = min(best, float(arcs[j]))
+    return best
+
+
+def _side_drawn(drawing: Drawing, crossing: np.ndarray, direction: np.ndarray,
+                normal: np.ndarray) -> bool:
+    """Le côté est-il dessiné là où le trait franchit sa droite ? On cherche
+    son encre sur la droite, du franchissement vers l'autre bout du côté
+    (``direction``), à un trait d'épaisseur près : le prolongement d'un côté
+    au-delà de son coin, où rien n'est dessiné, ne compte pas."""
+    lo, hi = SIDE_INK_MM
+    along = np.linspace(lo, hi, 5)
+    width = max(drawing.stroke_width, STEP_MM)
+    found = np.zeros(len(along), bool)
+    for shift in (-width / 2, 0.0, width / 2):
+        found |= drawing.on_ink(crossing + np.outer(along, direction) + shift * normal)
+    return int(found.sum()) >= len(along) - 1
 
 
 @dataclass
@@ -328,13 +413,17 @@ def _beyond_wedge(points: np.ndarray, a: np.ndarray, v: np.ndarray, c: np.ndarra
                   reach: float) -> np.ndarray:
     """Points à moins de ``reach`` de ``v`` qui sortent de l'angle (a, v, c)."""
     near = points[np.linalg.norm(points - v, axis=1) <= reach]
-    if not len(near):
-        return near
+    return near[_outside_wedge(near, a, v, c)]
+
+
+def _outside_wedge(points: np.ndarray, a: np.ndarray, v: np.ndarray,
+                   c: np.ndarray) -> np.ndarray:
+    """Pour chaque point, sort-il de l'angle (a, v, c) ?"""
     basis = np.column_stack([geo.unit(a - v), geo.unit(c - v)])
-    if abs(np.linalg.det(basis)) < 1e-6:
-        return near[:0]
-    coords = np.linalg.solve(basis, (near - v).T).T  # le long des deux côtés
-    return near[(coords < -WEDGE_TOLERANCE_MM).any(axis=1)]
+    if not len(points) or abs(np.linalg.det(basis)) < 1e-6:
+        return np.zeros(len(points), bool)
+    coords = np.linalg.solve(basis, (points - v).T).T  # le long des deux côtés
+    return (coords < -WEDGE_TOLERANCE_MM).any(axis=1)
 
 
 def away_from(drawing: Drawing, outlines: list[np.ndarray], distance: float) -> float:
@@ -395,6 +484,31 @@ def corner_polygon(outline: np.ndarray, epsilon: float, offset: float = 0.0,
             return poly
         del corners[k]
     return None
+
+
+def without_short_sides(poly: Polygon, min_side: float) -> Polygon:
+    """Polygone sans ses côtés de moins de ``min_side`` mm : un coin arrondi
+    coupé par un petit côté (chanfrein) redevient un coin, à la rencontre des
+    deux côtés voisins prolongés (s'ils ne sont pas presque parallèles)."""
+    corners, vertices = list(poly.corners), poly.vertices.copy()
+    while len(vertices) > 3:
+        n = len(vertices)
+        lengths = np.linalg.norm(np.roll(vertices, -1, axis=0) - vertices, axis=1)
+        k = int(np.argmin(lengths))
+        if lengths[k] >= min_side:
+            break
+        before, after = vertices[k - 1], vertices[(k + 2) % n]
+        corner = geo.line_intersection(vertices[k], vertices[k] - before,
+                                       vertices[(k + 1) % n], after - vertices[(k + 1) % n])
+        if corner is None or np.linalg.norm(corner - vertices[k]) > MAX_CORNER_SHIFT_MM:
+            break
+        vertices[k] = corner
+        vertices = np.delete(vertices, (k + 1) % n, axis=0)
+        del corners[(k + 1) % n]
+    if len(vertices) == len(poly.vertices):
+        return poly
+    kept = np.array(corners)
+    return Polygon(poly.outline, kept, vertices, _sides(poly.outline, kept))
 
 
 def wavy_changes(counts) -> int:

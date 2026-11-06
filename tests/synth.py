@@ -139,6 +139,28 @@ def v_shape(bottom_center, top: float = 18.0, base: float = 18.0, height: float 
     return left, right
 
 
+def v_overshoot(image: np.ndarray, spur: float, bow: float = 1.5, bottom_center=(32, 57),
+                **kwargs) -> np.ndarray:
+    """Item 17 dont la ligne extérieure gauche s'incurve de ``bow`` mm vers
+    l'intérieur (coin du bas à gauche arrondi) et dont la ligne intérieure qui
+    descend de la droite dépasse de ``spur`` mm la base, au coin en bas à
+    gauche du triangle."""
+    left, right = v_shape(bottom_center)
+    top_left, corner = np.array(left[0], float), np.array(left[3], float)
+    t = np.linspace(0, 1, 60)[:, None]
+    along = (corner - top_left) / np.linalg.norm(corner - top_left)
+    inward = np.array([along[1], -along[0]])
+    inward = inward if inward[0] > 0 else -inward  # vers la droite
+    outer = top_left + t * (corner - top_left) + bow * np.sin(np.pi * t) * inward
+    polyline(image, np.vstack([left[0:3], outer[::-1][:-1]]), closed=True, **kwargs)
+    polyline(image, [right[1], right[2], right[3], right[0]], closed=True, seed=1, **kwargs)
+    top = np.array(right[0], float)
+    if spur:
+        polyline(image, [corner, corner + spur * (corner - top) / np.linalg.norm(corner - top)],
+                 **kwargs)
+    return image
+
+
 def stairs_points(top_left, step: float = 12.3, steps: int = 4, heights=None):
     """Contour de l'escalier de l'item 18 (``heights`` : hauteur de chaque
     marche, de haut en bas)."""
