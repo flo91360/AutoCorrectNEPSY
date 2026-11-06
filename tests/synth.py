@@ -193,16 +193,26 @@ def bucket(top_center, a: float = 28.0, b: float = 15.6, inner: float = 0.8, dro
     return strokes
 
 
+# Fleur du modèle (item 20) : deux pétales verticaux et quatre pétales latéraux
+# dont les pointes forment un « X » de 34° (Global D : 20° à 45°), plus étroits
+# que les 8 mm par défaut pour ne pas se toucher.
+MODEL_FLOWER_DEG = (90.0, 163.0, 197.0, 270.0, 343.0, 17.0)
+
+
 def flower(center, petals: int = 6, length: float = 30.0, width: float = 8.0, bend: float = 1.5,
-           start_deg: float = 90.0, lengths=None, starts=None, blunt: bool = False):
+           start_deg: float = 90.0, lengths=None, starts=None, blunt: bool = False,
+           directions=None):
     """Fleur de l'item 20 : pétales pointus aux bords en « S », tournant tous
     dans le même sens. ``starts`` : distance au centre où part chaque pétale ;
-    ``blunt`` : bouts arrondis. Renvoie le contour de chaque pétale."""
+    ``blunt`` : bouts arrondis ; ``directions`` : direction de chaque pétale
+    (degrés, sens trigonométrique), régulièrement espacés par défaut. Renvoie le
+    contour de chaque pétale."""
     c = np.asarray(center, float)
     found = []
     for k in range(petals):
         size = lengths[k] if lengths else length
-        angle = np.radians(start_deg + k * 360.0 / petals)
+        angle = np.radians(directions[k] if directions is not None
+                           else start_deg + k * 360.0 / petals)
         along = np.array([np.cos(angle), -np.sin(angle)])
         across = np.array([-along[1], along[0]])
         base = c + along * (starts[k] if starts else 0.0)
@@ -332,7 +342,7 @@ def draw_model(item: int, image: np.ndarray, color=BLUE_PEN, wobble: float = 0.0
         for i, (points, closed) in enumerate(bucket((32, 30))):
             draw(points, closed=closed, seed=i)
     elif item == 20:
-        for i, petal in enumerate(flower((32, 44))):
+        for i, petal in enumerate(flower((32, 44), width=7.0, directions=MODEL_FLOWER_DEG)):
             draw(petal, closed=True, seed=i)
     elif item == 21:
         for i, (points, closed) in enumerate(wheels()):
