@@ -32,7 +32,7 @@ EXPECTED_MARKS = {
     17: {"trace": 3, "angle": 1, "cote": 1, "segment": 2},
     18: {"trace": 1, "cote": 2, "segment": 4},
     19: {"trace": 3, "segment": 3, "bande": 2},
-    20: {"trace": 6, "segment": 6, "cercle": 1},
+    20: {"trace": 6, "segment": 4, "angle": 1, "cercle": 1},
     21: {"trace": 2, "segment": 13},
 }
 

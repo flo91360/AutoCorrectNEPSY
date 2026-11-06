@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from autocorrect_nepsy.criteria import item_10, score_item
+from autocorrect_nepsy.criteria import item_10, item_20, score_item
 from autocorrect_nepsy.ink import ink_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
@@ -723,6 +723,42 @@ def test_item1_extra_line_asks_review():
     assert score(1, image).to_review
     for item in (1, 2):
         assert not score(item, draw_model(item, canvas(), wobble=0.8)).to_review
+
+
+@pytest.mark.parametrize("side, met, borderline", [(17, 1, False), (22, 1, True), (23, 0, True),
+                                                   (30, 0, False)])
+def test_item20_global_d_angle_between_lateral_segments(side, met, borderline):
+    # Pétales latéraux à ``side`` degrés de l'horizontale : leurs pointes forment
+    # un « X » d'environ deux fois cet angle (34°, 44°, 46°, 60°).
+    # Pétales de 7 mm de large, comme le modèle : à 8 mm, ils se touchent à 17°.
+    image = flower_image(width=7.0, directions=(90, 180 - side, 180 + side, 270, 360 - side, side))
+    criterion = score(20, image).criteria["D"]
+    assert (criterion.score, criterion.borderline) == (met, borderline), criterion.details
+    details = " ".join(criterion.details)
+    assert "pointes des pétales latéraux opposés" in details
+    assert "de l'horizontale" not in details
+
+
+def test_item20_cross_angle_of_lateral_tips():
+    # Repère de l'image (ordonnée vers le bas) : haut gauche, bas gauche, haut droite, bas droite.
+    tips = [np.array(p, float) for p in ((0, -5), (0, 5), (40, -10), (40, 10))]
+    angle, (top_left, bottom_right, top_right, bottom_left) = item_20._cross(tips[::-1])
+    assert np.allclose([top_left, bottom_right, top_right, bottom_left],
+                       [tips[0], tips[3], tips[2], tips[1]])
+    expected = 2 * np.degrees(np.arctan2(15, 40))  # X ouvert vers la gauche
+    assert abs(angle - expected) < 1e-6
+    assert item_20._cross(tips[:3]) is None
+
+
+def test_item20_cross_angle_borderline_margin():
+    from autocorrect_nepsy.criteria.base import Checks
+    for value, met, near in ((41.5, True, True), (40.5, True, False), (48.5, False, True),
+                             (49.5, False, False), (16.5, False, True), (24.5, True, False)):
+        checks = Checks().limit(value, "angle", low=item_20.CROSS_MIN_DEG,
+                                high=item_20.CROSS_MAX_DEG, unit="deg",
+                                margin=item_20.CROSS_BORDERLINE_DEG)
+        criterion = checks.criterion("D")
+        assert (criterion.met, criterion.borderline) == (met, near), value
 
 
 def test_item20_unexpected_petal_count_asks_review():

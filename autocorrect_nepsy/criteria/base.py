@@ -27,8 +27,12 @@ BORDERLINE = {"mm": (0.02, 0.5), "deg": (0.0, 2.0), "ratio": (0.03, 0.03), "part
 THRESHOLD_UNITS = (*BORDERLINE, "nombre")
 
 
-def near_threshold(value: float, threshold: float, unit: str = "mm") -> bool:
-    """La mesure est assez proche du seuil pour que la note puisse basculer."""
+def near_threshold(value: float, threshold: float, unit: str = "mm",
+                   margin: float | None = None) -> bool:
+    """La mesure est assez proche du seuil pour que la note puisse basculer.
+    ``margin`` : marge propre à une mesure, à la place de celle de l'unité."""
+    if margin is not None:
+        return abs(value - threshold) <= margin
     fraction, minimum = BORDERLINE[unit]
     return abs(value - threshold) <= max(fraction * abs(threshold), minimum)
 
@@ -108,10 +112,12 @@ class Checks:
         return self.add(False, text)
 
     def limit(self, value: float, text: str, low: float | None = None,
-              high: float | None = None, unit: str = "mm") -> "Checks":
-        """Condition chiffrée ``low <= value <= high`` (bornes facultatives)."""
+              high: float | None = None, unit: str = "mm",
+              margin: float | None = None) -> "Checks":
+        """Condition chiffrée ``low <= value <= high`` (bornes facultatives).
+        ``margin`` : marge « limite » propre à la mesure (voir ``near_threshold``)."""
         ok = (low is None or value >= low) and (high is None or value <= high)
-        near = any(near_threshold(value, t, unit) for t in (low, high) if t is not None)
+        near = any(near_threshold(value, t, unit, margin) for t in (low, high) if t is not None)
         return self.add(ok, text, near)
 
     def criterion(self, code: str) -> Criterion:
