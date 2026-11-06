@@ -10,6 +10,12 @@ est le point de la région le plus proche du centre de la fleur. Les angles se
 mesurent à la pointe de la région, là où les deux bords se rejoignent (la fine
 pointe d'encre qui la prolonge se recourbe). Deux pétales
 mal fermés au centre forment une seule région, partagée entre leurs pointes.
+
+Global D : les pointes des quatre pétales latéraux forment un « X », un segment
+du pétale en haut à gauche à celui en bas à droite, l'autre du pétale en haut à
+droite à celui en bas à gauche. L'angle contrôlé est celui que forment ces deux
+segments à leur intersection, ouvert vers la gauche (égal à celui ouvert vers la
+droite), comme au rapporteur : ni l'horizontale ni la verticale n'interviennent.
 """
 
 from __future__ import annotations
@@ -35,10 +41,10 @@ CONVERGE_MM = threshold(2.0, "D", "écart entre les extrémités intérieures de
 TIP_JOIN_MM = threshold(1.0, "B", "intervalle ou dépassement à la pointe d'un pétale, au plus")
 VERTICAL_MAX_DEG = threshold(5.0, "D", "écart de l'axe des deux pétales verticaux à la verticale, "
                              "au plus", "deg")
-SIDE_MIN_DEG = threshold(20.0, "D", "angle des quatre autres pétales avec l'horizontale, au moins",
-                         "deg")
-SIDE_MAX_DEG = threshold(45.0, "D", "angle des quatre autres pétales avec l'horizontale, au plus",
-                         "deg")
+CROSS_MIN_DEG = threshold(20.0, "D", "angle entre les deux segments qui joignent les pointes des "
+                          "pétales latéraux opposés, au moins", "deg")
+CROSS_MAX_DEG = threshold(45.0, "D", "angle entre les deux segments qui joignent les pointes des "
+                          "pétales latéraux opposés, au plus", "deg")
 MAX_WIDTH_MM = threshold(11.0, "E", "largeur de chaque pétale, au plus")
 MIN_LENGTH_MM = threshold(27.0, "E", "longueur de chaque pétale, au moins")
 MAX_LENGTH_MM = threshold(33.0, "F", "longueur de chaque pétale, au plus")
@@ -59,6 +65,13 @@ VERTICAL_LOOSE_DEG = 20.0  # Général : axe « relativement » vertical
 WAVE_MM = 1.0  # crête ou creux d'un bord (écart à sa corde)
 CORNER_DEG = 75.0  # Motricité A : angle marqué le long d'un bord
 CORNER_ARC_MM = 1.5
+# Marge « à vérifier » de l'angle entre les deux segments (Global D), plus large
+# que celle d'un angle lu sur un seul trait (2°) : au rapporteur (2°) s'ajoute
+# l'emplacement des quatre pointes, choisies à l'œil par l'ergothérapeute. Un
+# millimètre d'écart au bout d'un segment d'environ 50 mm le tourne d'environ
+# 1°, soit 2° de plus pour deux segments. Sur le cas qui a motivé cette mesure,
+# l'ergothérapeute lit 45° et la capture de l'outil donne environ 48°.
+CROSS_BORDERLINE_DEG = 4.0
 # Bouts d'un bord écartés pour chercher les angles : le centre, où les bords se
 # rejoignent, et la pointe, qui se recourbe en crochet sur le modèle aussi.
 INNER_ZONE_MM = 4.0
@@ -128,9 +141,6 @@ def score(drawing: Drawing, item: int = 20) -> ItemResult:
         if petal.outline is not None:
             trace = np.roll(petal.outline, -petal.apex, axis=0) if petal.closed else petal.outline
             scoring.marks.append(mk.trace(trace, f"{fmt(lengths[-1], '')} × {fmt(widths[-1])}", k))
-        normal = np.array([-rel[1], rel[0]])
-        scoring.marks.append(mk.segment(center, petal.point,
-                                        f"{_from_horizontal(angles[-1]):.0f}°", side=normal))
     inner_ends = [p.inner_end for p in petals if p.outline is not None]
     spread = _spread(inner_ends)
     if inner_ends:
@@ -158,6 +168,21 @@ def score(drawing: Drawing, item: int = 20) -> ItemResult:
     vertical = _axis_tilt(petals[top].point, petals[bottom].point) if top != bottom else 90.0
     others = [k for k in range(count) if k not in (top, bottom)]
     scoring.measures["axe_vertical_deg"] = vertical
+    for k in {top, bottom}:
+        rel = petals[k].point - center
+        scoring.marks.append(mk.segment(center, petals[k].point,
+                                        f"{_from_horizontal(angles[k]):.0f}°",
+                                        side=np.array([-rel[1], rel[0]])))
+    cross = _cross([petals[k].point for k in others])
+    if cross is not None:
+        cross_angle, (top_left, bottom_right, top_right, bottom_left) = cross
+        scoring.measures["angle_pétales_latéraux_deg"] = cross_angle
+        meet = geo.line_intersection(top_left, bottom_right - top_left,
+                                     top_right, bottom_left - top_right)
+        meet = center if meet is None else meet
+        scoring.marks += [mk.segment(top_left, bottom_right, "pointes opposées"),
+                          mk.segment(top_right, bottom_left, "pointes opposées"),
+                          mk.angle(meet, top_left, bottom_left, f"{cross_angle:.0f}°")]
 
     corner_text = (f"angle le plus marqué le long des bords {sharp:.0f}° ≤ "
                    f"{fmt_limit(CORNER_DEG, 'deg')}")
@@ -203,11 +228,15 @@ def score(drawing: Drawing, item: int = 20) -> ItemResult:
                        f"(≤ {CONVERGE_MM.text})", high=CONVERGE_MM)
     scoring["D"].limit(vertical, f"axe des deux pétales verticaux à {vertical:.0f}° de la "
                        f"verticale (≤ {VERTICAL_MAX_DEG.text})", high=VERTICAL_MAX_DEG, unit="deg")
-    for k in others:
-        tilt = _from_horizontal(angles[k])
-        scoring["D"].limit(tilt, f"pétale {k + 1} à {tilt:.0f}° de l'horizontale "
-                           f"({SIDE_MIN_DEG.text} à {SIDE_MAX_DEG.text})", low=SIDE_MIN_DEG,
-                           high=SIDE_MAX_DEG, unit="deg")
+    if cross is None:
+        scoring["D"].fail(f"{len(others)} pétale(s) latéral(aux) au lieu de quatre : angle entre "
+                          "les segments qui joignent leurs pointes non mesurable")
+    else:
+        scoring["D"].limit(cross_angle, f"angle de {cross_angle:.0f}° entre les segments qui "
+                           "joignent les pointes des pétales latéraux opposés "
+                           f"({CROSS_MIN_DEG.text} à {CROSS_MAX_DEG.text})",
+                           low=CROSS_MIN_DEG, high=CROSS_MAX_DEG,
+                           unit="deg", margin=CROSS_BORDERLINE_DEG)
 
     for k, (length, width) in enumerate(zip(lengths, widths)):
         scoring["E"].limit(width, f"pétale {k + 1} : largeur {fmt(width)} ≤ {MAX_WIDTH_MM.text}",
@@ -397,6 +426,21 @@ def _spread(points: list[np.ndarray]) -> float:
     pts = np.array(points)
     farthest = float(np.sqrt(((pts[:, None, :] - pts[None, :, :]) ** 2).sum(-1)).max())
     return max(farthest - 2 * INNER_SHORTFALL_MM, 0.0)
+
+
+def _cross(tips: list[np.ndarray]) -> tuple[float, tuple] | None:
+    """Angle (degrés) entre les deux segments qui joignent les pointes des quatre
+    pétales latéraux opposés (haut gauche → bas droite, haut droite → bas gauche),
+    ouvert vers la gauche, et ces quatre pointes dans cet ordre. None s'il n'y a
+    pas quatre pétales latéraux."""
+    if len(tips) != 4:
+        return None
+    by_x = sorted(tips, key=lambda p: p[0])
+    # Repère de l'image : l'ordonnée croît vers le bas.
+    top_left, bottom_left = sorted(by_x[:2], key=lambda p: p[1])
+    top_right, bottom_right = sorted(by_x[2:], key=lambda p: p[1])
+    angle = geo.angle_between(top_left - bottom_right, bottom_left - top_right)
+    return angle, (top_left, bottom_right, top_right, bottom_left)
 
 
 def _from_horizontal(angle: float) -> float:
