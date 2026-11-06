@@ -6,6 +6,11 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.8] - 2026-11-06
+<!-- planifikateur:a8e1a783-5bf3-4ff9-8779-acf76efc16f3 -->
+
+- **figure 13 critère motricité B** : J'ai corrigé l'échec : il venait seulement de l'instantané de cotation. Le test de l'instantané passe maintenant. Je n'ai pas relancé toute la suite ; seule une ligne de l'instantané a changé depuis la dernière livraison. **Cause de l'échec.** La carte figure 20 (#34), arrivée sur `main`, a ajouté un nouveau dessin du modèle 20. L'instantané note chaque item aussi sur les dessins des autres modèles. Celui de `main` avait été calculé avec l'ancienne mesure de l'item 13. Avec la nouvelle mesure, ce dessin, qui n'est pas un éventail, est toujours coté Motricité B = 0. Mais son plus grand écart vaut 2,04 mm, juste au-dessus du seuil de 2 mm : le critère est donc marqué « limite » et l'item « à vérifier ». **Correction.** J'ai régénéré `tests/instantane_cotation.json`, et seule cette entrée change (13/20/0.6 : B0 devient B0~ ⚠). Je n'ai touché ni au code ni au seuil de 2 mm. **Rappel de la correction livrée (inchangée).** Sur la figure 13, l'intervalle entre un trait radial et la base est mesuré sur l'encre réellement présente. Le griffonnage (« pastille ») et la zone où les traits se rejoignent ne comptent plus comme un écart, ce qui donne Motricité B = 1 sur le cas de la carte. Un vrai écart de plus de 2 mm donne toujours 0. Sous la base, la partie d'un trait perdue dans une zone coloriée ne compte pas comme un dépassement. Les tests sur dessins synthétiques sont dans `tests/test_criteria.py` et `tests/test_strokes.py`.
+
 ## [0.14.7] - 2026-11-06
 <!-- planifikateur:622367a2-e7cc-492a-b015-96634b80941d -->
 
