@@ -9,7 +9,7 @@ from autocorrect_nepsy.strokes import extract_drawing
 
 from synth import (PENCIL, PX_PER_MM, bucket, canvas, circle_points, cross_points, cylinder, dot,
                    dot_row, draw_model, flower, nested_triangles, polyline, rounded_rectangle,
-                   s_curve, stairs_points, v_shape, wheels, zigzag)
+                   s_curve, stairs_points, v_overshoot, v_shape, wheels, zigzag)
 
 
 def score(item, image):
@@ -400,6 +400,23 @@ def test_item17_tilted_tops_fail_general():
         polyline(image, points, closed=True, seed=i)
     result = scores(score(17, image))
     assert result["G"] == 0 and result["C"] == 1
+
+
+@pytest.mark.parametrize("bow", [0.0, 1.5])
+@pytest.mark.parametrize("spur, motor_b", [(1.6, 1), (2.4, 0)])
+def test_item17_overshoot_at_bottom_left_of_triangle(bow, spur, motor_b):
+    # Ligne intérieure qui dépasse la base au coin en bas à gauche du triangle,
+    # ligne extérieure gauche un peu incurvée (coin arrondi) : le coin
+    # recalculé tombe à côté du croisement dessiné. L'ancienne mesure (distance
+    # à ce coin) donnait 2,2 à 2,3 mm pour un dépassement de 1,6 mm.
+    result = score(17, v_overshoot(canvas(), spur, bow))
+    assert scores(result)["B"] == motor_b, result.criteria["B"].details
+    assert abs(result.measures["jonction_max_mm"] - spur) <= 0.4
+
+
+def test_item17_wobbly_copy_without_overshoot_passes_motricite_b():
+    result = score(17, v_overshoot(canvas(), 0.0, wobble=0.5))
+    assert scores(result)["B"] == 1, result.criteria["B"].details
 
 
 def test_item18_step_count_and_heights():
