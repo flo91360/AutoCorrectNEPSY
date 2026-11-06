@@ -7,7 +7,7 @@ from autocorrect_nepsy.criteria import item_10, score_item
 from autocorrect_nepsy.ink import ink_mask
 from autocorrect_nepsy.strokes import extract_drawing
 
-from synth import (PENCIL, PX_PER_MM, bucket, canvas, circle_points, cross_points, cylinder, dot,
+from synth import (PENCIL, PX_PER_MM, bowed, bucket, canvas, circle_points, cross_points, cylinder, dot,
                    dot_row, draw_model, flower, nested_triangles, polyline, rounded_rectangle,
                    s_curve, stairs_points, v_overshoot, v_shape, wheels, zigzag)
 
@@ -382,6 +382,44 @@ def test_item16_tilted_small_triangle_fails_global_d():
     result = score(16, image)
     assert scores(result)["D"] == 0
     assert result.measures["alignement_sommets_mm"] > 4
+
+
+def _nested_triangles_by_hand(bulge: float = 1.5, **kwargs):
+    """Item 16 à main levée : côtés du grand triangle un peu bombés vers
+    l'extérieur, comme souvent chez l'enfant."""
+    big, *rest = nested_triangles((32, 26), **kwargs)
+    image = canvas()
+    for i, (p, q) in enumerate(((big[0], big[2]), (big[2], big[1]), (big[1], big[0]))):
+        polyline(image, bowed(p, q, bulge), seed=10 + i)
+    for i, points in enumerate(rest):
+        polyline(image, points, closed=len(points) == 3, seed=i)
+    return score(16, image)
+
+
+@pytest.mark.parametrize("small_scale", [1.0, 0.75])
+def test_item16_linked_corners_inside_pass_general(small_scale):
+    # Côtés du grand bombés : leurs droites se croisent hors de l'encre ; la
+    # liaison se mesure depuis la pointe tracée. Petit triangle non collé
+    # aux côtés (0,75) : pas un motif d'échec.
+    result = _nested_triangles_by_hand(small_scale=small_scale)
+    general = result.criteria["G"]
+    assert general.score == 1, general.details
+    assert any("100 %, 100 %, 100 % tracés" in d for d in general.details)
+    assert scores(result)["C"] == 1
+
+
+def test_item16_small_corner_outside_fails_general():
+    result = _nested_triangles_by_hand(small_scale=1.5)
+    assert scores(result)["G"] == 0 and scores(result)["C"] == 0
+
+
+def test_item16_corners_not_linked_fail_general():
+    # Lignes arrêtées 6 mm avant les coins du petit triangle.
+    general = _nested_triangles_by_hand(link_short=6).criteria["G"]
+    assert general.score == 0
+    assert any(d.startswith("✗ chaque coin du grand triangle relié") for d in general.details)
+    # Petit triangle non collé et non relié : figure incomplète.
+    assert scores(_nested_triangles_by_hand(small_scale=0.75, link_short=6))["G"] == 0
 
 
 def test_item17_single_lines_and_wide_angle():
