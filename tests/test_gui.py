@@ -368,3 +368,42 @@ def test_empty_corpus_is_explained(app, tmp_path, monkeypatch):
     app.run_validation(tmp_path)
     wait(app, lambda: errors and not app.busy)
     assert "un sous-dossier par protocole" in errors[0] and app.validation_window is None
+
+
+def test_window_fits_the_screen(app):
+    root = app.root
+    root.deiconify()
+    root.update()
+    width, height = root.winfo_width(), root.winfo_height()
+    assert width <= root.winfo_screenwidth()
+    assert height <= root.winfo_screenheight()
+    min_w, min_h = root.minsize()
+    assert min_w <= width and min_h <= height
+
+
+def test_scans_panel_is_never_left_collapsed(app):
+    """Sur un ordinateur lent, le séparateur était placé avant que la fenêtre
+    ait sa taille et restait collé à gauche : les étapes 1 et 2 disparaissaient."""
+    root = app.root
+    root.deiconify()
+    root.geometry("1200x700")
+    root.update()
+    app.panes.sashpos(0, 0)
+    root.geometry("1250x720")
+    root.update()
+    assert app.panes.sashpos(0) >= app.panes.winfo_width() // 4
+    assert app.add_button.winfo_ismapped()
+
+
+def test_small_window_keeps_steps_and_buttons_visible(app):
+    """Sur un petit écran (ou à 150 %), ce sont la liste des scans et le
+    tableau qui rétrécissent, pas le bouton de lancement ni la barre d'état."""
+    root = app.root
+    root.deiconify()
+    root.minsize(1, 1)
+    root.geometry("1000x480")
+    root.update()
+    for widget in (app.add_button, app.run_button, app.compare_button, app.status):
+        assert widget.winfo_ismapped()
+        bottom = widget.winfo_rooty() + widget.winfo_height()
+        assert bottom <= root.winfo_rooty() + root.winfo_height()

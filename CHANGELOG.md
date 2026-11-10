@@ -6,6 +6,10 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.14.10] - 2026-11-10
+
+- Fenêtre principale adaptée aux portables : les étapes 1 et 2 ne disparaissent plus (séparateur des panneaux placé une fois la fenêtre à sa taille et rouvert s'il est écrasé), taille ajustée à l'écran et à la mise à l'échelle de Windows (125/150 %), bouton de lancement et barre d'état toujours visibles.
+
 ## [0.14.9] - 2026-11-06
 <!-- planifikateur:36b97a9b-2af0-4415-b6a8-af7bdec19096 -->
 

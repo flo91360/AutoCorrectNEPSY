@@ -44,6 +44,11 @@ SCAN_TYPES = [("Scans (PDF, images)", "*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.b
               ("Tous les fichiers", "*.*")]
 PAGE_LABELS = {page_label(number): number for number in ITEMS_BY_PAGE}
 THUMB_WIDTH = 180
+# Tailles de la fenêtre et du panneau des scans à 100 %, agrandies selon la
+# mise à l'échelle de l'affichage et limitées à la taille de l'écran.
+WINDOW_SIZE = (1260, 780)
+WINDOW_MIN = (1100, 640)
+SCANS_WIDTH = 560
 REVIEW_IMAGE = 360  # taille maximale du dessin dans la fenêtre de vérification
 REVIEW_COLOR = "#fde7c4"
 LIMIT_COLOR = "#c62828"  # critère limite dans la fenêtre de vérification
@@ -251,14 +256,39 @@ class App:
         self.review_vars: dict[str, tk.IntVar] = {}
         self.validation_window: tk.Toplevel | None = None
         root.title(f"{APP_NAME} – Copie de figures (version {__version__})")
-        root.geometry("1260x780")
-        root.minsize(1100, 640)
+        self._size_window()
         self._icon = ImageTk.PhotoImage(app_icon(64))
         root.iconphoto(True, self._icon)
         self._styles()
         self._build()
 
     # -- construction de la fenêtre -------------------------------------------
+    def _zoom(self) -> float:
+        """Agrandissement de l'affichage (1 à 100 %, 1,5 à 150 % sous Windows)."""
+        try:
+            return max(1.0, float(self.root.tk.call("tk", "scaling")) * 72 / 96)
+        except (tk.TclError, ValueError):
+            return 1.0
+
+    def _size_window(self) -> None:
+        """Taille de la fenêtre adaptée à l'écran et à la mise à l'échelle de
+        Windows : sur un portable (petit écran, affichage à 125 ou 150 %), la
+        fenêtre ne doit jamais dépasser de l'écran."""
+        root, zoom = self.root, self._zoom()
+        screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
+        # Marge pour la barre des tâches et la barre de titre.
+        free_w, free_h = screen_w - 20, screen_h - int(90 * zoom)
+        width, height = min(int(WINDOW_SIZE[0] * zoom), free_w), min(int(WINDOW_SIZE[1] * zoom), free_h)
+        root.minsize(min(int(WINDOW_MIN[0] * zoom), width), min(int(WINDOW_MIN[1] * zoom), height))
+        x, y = max(0, (screen_w - width) // 2), max(0, (free_h - height) // 2)
+        root.geometry(f"{width}x{height}+{x}+{y}")
+        if width == free_w or height == free_h:
+            # Écran trop petit pour la taille prévue : on occupe tout l'écran.
+            try:
+                root.state("zoomed")
+            except tk.TclError:
+                pass
+
     def _styles(self) -> None:
         style = ttk.Style(self.root)
         if "vista" not in style.theme_names() and "clam" in style.theme_names():
@@ -296,15 +326,32 @@ class App:
         panes.add(right, weight=1)
         self._build_scans(left)
         self._build_results(right)
-        # Le panneau des scans a besoin de place pour ses réglages.
-        self.root.after(50, lambda: panes.sashpos(0, 560))
+        self.panes = panes
+        self._sash_placed = False
+        # Le séparateur n'est placé qu'une fois le panneau à sa vraie taille :
+        # placé trop tôt (ordinateur lent), il restait collé à gauche et
+        # masquait les étapes 1 et 2.
+        panes.bind("<Configure>", self._place_sash, add="+")
 
+        # La barre d'état est réservée avant les panneaux pour rester visible.
         bar = ttk.Frame(self.root, padding=(16, 4, 16, 10))
-        bar.pack(fill="x")
+        bar.pack(side="bottom", fill="x", before=panes)
         self.progress = ttk.Progressbar(bar, mode="determinate", length=260)
         self.progress.pack(side="left")
         self.status = ttk.Label(bar, text="Ajoutez les pages scannées du cahier de l'enfant.")
         self.status.pack(side="left", padx=12)
+
+    def _place_sash(self, event=None) -> None:
+        """Donne au panneau des scans la place de ses réglages (560 points à
+        100 %), sans jamais dépasser la moitié de la fenêtre, et le rouvre s'il
+        a été écrasé contre le bord gauche."""
+        width = self.panes.winfo_width()
+        if width < 200:
+            return
+        if self._sash_placed and self.panes.sashpos(0) >= width // 4:
+            return
+        self.panes.sashpos(0, min(int(SCANS_WIDTH * self._zoom()), width // 2))
+        self._sash_placed = True
 
     def _build_scans(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="1. Scans du cahier de l'enfant", style="Step.TLabel").pack(anchor="w")
@@ -317,6 +364,10 @@ class App:
 
         holder = ttk.Frame(parent, relief="groove", borderwidth=1)
         holder.pack(fill="both", expand=True)
+        # Étape 2 et bouton de lancement réservés avant la liste des scans :
+        # sur un petit écran, c'est la liste (qui défile) qui rétrécit.
+        bottom = ttk.Frame(parent)
+        bottom.pack(side="bottom", fill="x", before=holder)
         self.canvas = tk.Canvas(holder, highlightthickness=0, background="#ffffff")
         scrollbar = ttk.Scrollbar(holder, orient="vertical", command=self.canvas.yview)
         self.list_frame = tk.Frame(self.canvas, background="#ffffff")
@@ -338,14 +389,14 @@ class App:
                  "chaque page est remise à l'endroit automatiquement.")
         self.empty_hint.pack(fill="x")
 
-        options = ttk.Frame(parent)
+        options = ttk.Frame(bottom)
         options.pack(fill="x", pady=(10, 4))
         ttk.Label(options, text="2. Couleur du stylo de l'enfant :", style="Step.TLabel").pack(side="left")
         for color in INK_HUES:
             ttk.Radiobutton(options, text=color, value=color, variable=self.ink_var,
                             command=self.ink_changed).pack(side="left", padx=6)
 
-        child = ttk.Frame(parent)
+        child = ttk.Frame(bottom)
         child.pack(fill="x", pady=(6, 0))
         for line, (text, var) in enumerate((("Enfant (pseudonyme ou initiales) :", self.child_var),
                                             ("Date de passation :", self.date_var))):
@@ -356,7 +407,7 @@ class App:
                   "des résultats.", style="Hint.TLabel").grid(row=2, column=0, columnspan=2,
                                                               sticky="w")
 
-        self.run_button = ttk.Button(parent, text="▶  Lancer la correction automatique",
+        self.run_button = ttk.Button(bottom, text="▶  Lancer la correction automatique",
                                      style="Big.TButton", command=self.run_correction,
                                      state="disabled")
         self.run_button.pack(fill="x", pady=(8, 0))
@@ -372,6 +423,9 @@ class App:
                    ("F", "Loc. F", 50), ("loc", "Local", 48), ("verif", "À vérifier", 70)]
         table = ttk.Frame(parent)
         table.pack(fill="both", expand=True)
+        # Comme pour les scans : c'est le tableau (qui défile) qui rétrécit.
+        bottom = ttk.Frame(parent)
+        bottom.pack(side="bottom", fill="x", before=table)
         self.tree = ttk.Treeview(table, columns=[c[0] for c in columns], show="headings",
                                  selectmode="browse")
         for key, title, width in columns:
@@ -386,18 +440,18 @@ class App:
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        ttk.Label(parent, text="Double-cliquez sur un item pour voir son dessin et le détail "
+        ttk.Label(bottom, text="Double-cliquez sur un item pour voir son dessin et le détail "
                   "des mesures. « ⚠ B » : mesure proche du seuil au critère B ; « ✎ » : note "
                   "changée par l'ergothérapeute.",
                   style="Hint.TLabel", wraplength=640, justify="left").pack(anchor="w", pady=(4, 0))
-        self.warnings = ttk.Label(parent, text="", style="Warn.TLabel", wraplength=640,
+        self.warnings = ttk.Label(bottom, text="", style="Warn.TLabel", wraplength=640,
                                   justify="left")
         self.warnings.pack(fill="x", pady=(4, 0))
 
-        self.review_button = ttk.Button(parent, text="✎  Vérifier / corriger l'item sélectionné…",
+        self.review_button = ttk.Button(bottom, text="✎  Vérifier / corriger l'item sélectionné…",
                                         command=self.review_item, state="disabled")
         self.review_button.pack(anchor="w", pady=(8, 0))
-        buttons = ttk.Frame(parent)
+        buttons = ttk.Frame(bottom)
         buttons.pack(fill="x", pady=(6, 0))
         self.report_button = ttk.Button(buttons, text="Ouvrir le rapport détaillé",
                                         command=self.open_report, state="disabled")
