@@ -386,11 +386,15 @@ def test_scans_panel_is_never_left_collapsed(app):
     ait sa taille et restait collé à gauche : les étapes 1 et 2 disparaissaient."""
     root = app.root
     root.deiconify()
-    root.geometry("1200x700")
     root.update()
+    assert app.panes.sashpos(0) >= app.panes.winfo_width() // 4
+    # Écrasé contre le bord, il est rouvert au redimensionnement suivant (on
+    # rétrécit la fenêtre : l'agrandir peut être refusé sur un petit écran).
     app.panes.sashpos(0, 0)
-    root.geometry("1250x720")
+    root.minsize(1, 1)
+    root.geometry("900x600")
     root.update()
+    assert app.panes.winfo_width() < 1000
     assert app.panes.sashpos(0) >= app.panes.winfo_width() // 4
     assert app.add_button.winfo_ismapped()
 
