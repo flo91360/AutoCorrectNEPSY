@@ -391,6 +391,9 @@ def test_scans_panel_is_never_left_collapsed(app):
     # Écrasé contre le bord, il est rouvert au redimensionnement suivant (on
     # rétrécit la fenêtre : l'agrandir peut être refusé sur un petit écran).
     app.panes.sashpos(0, 0)
+    # Sur un petit écran (CI Windows), la fenêtre est agrandie à tout l'écran
+    # et ignore une nouvelle taille : on la remet d'abord en mode normal.
+    root.state("normal")
     root.minsize(1, 1)
     root.geometry("900x600")
     root.update()
@@ -404,6 +407,7 @@ def test_small_window_keeps_steps_and_buttons_visible(app):
     tableau qui rétrécissent, pas le bouton de lancement ni la barre d'état."""
     root = app.root
     root.deiconify()
+    root.state("normal")
     root.minsize(1, 1)
     root.geometry("1000x480")
     root.update()
