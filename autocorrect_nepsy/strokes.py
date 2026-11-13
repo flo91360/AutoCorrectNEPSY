@@ -23,6 +23,12 @@ import numpy as np
 from . import geometry as geo
 
 STEP_MM = 0.3  # pas de rééchantillonnage des traits
+# Bout libre d'un trait : le squelette s'arrête au centre de la pointe du
+# stylo, une demi-épaisseur avant le bout de l'encre. Le trait est prolongé
+# jusqu'au bord de l'encre (ce que mesure une règle), sur au plus cette
+# distance et d'après sa direction sur ses derniers millimètres.
+END_REACH_MM = 2.0
+END_DIRECTION_MM = 1.5
 NODE_RADIUS_MM = 1.2  # rayon de regroupement des pixels de croisement
 MIN_COMPONENT_MM = 1.0  # taches plus petites ignorées (poussières, bavures)
 MIN_BLOB_MM = 0.5  # plus petite tache gardée comme marque (point de stylo)
@@ -247,11 +253,19 @@ def extract_drawing(ink: np.ndarray, px_per_mm: float) -> Drawing:
     skeleton = skeletonize(mask.astype(bool))
     if not skeleton.any():
         return Drawing([], 0.0, [], blobs, mask, px_per_mm)
-    stroke_width = float(mask.sum() / max(1, skeleton.sum())) / px_per_mm
     graph = _SkeletonGraph(skeleton, px_per_mm)
-    strokes = [Stroke(geo.resample(points, STEP_MM, closed), closed)
-               for points, closed in graph.strokes()]
-    strokes = [s for s in strokes if s.length >= MIN_COMPONENT_MM]
+    graph.extend_free_ends(mask)
+    strokes, drawn = [], 0.0
+    for points, closed, extended in graph.strokes():
+        stroke = Stroke(geo.resample(points, STEP_MM, closed), closed)
+        drawn += stroke.length
+        # Une tache prolongée jusqu'à ses bords reste une tache, pas un trait.
+        if stroke.length - extended >= MIN_COMPONENT_MM:
+            strokes.append(stroke)
+    # Épaisseur moyenne du trait : surface d'encre divisée par la longueur
+    # tracée. (Divisée par le nombre de pixels du squelette, elle grossissait
+    # jusqu'à 40 % pour un trait oblique, où un pixel couvre plus de longueur.)
+    stroke_width = float(mask.sum()) / px_per_mm ** 2 / max(drawn, 1.0 / px_per_mm)
     count, labels = cv2.connectedComponents(mask, connectivity=8)
     sizes = []
     for label in range(1, count):
@@ -339,6 +353,7 @@ class _SkeletonGraph:
     def __init__(self, skeleton: np.ndarray, px_per_mm: float):
         self.px_per_mm = px_per_mm
         self.edges: list[list] = []  # [points (mm), nœud début, nœud fin]
+        self.extensions: dict[int, float] = {}  # arête -> prolongement de ses bouts libres (mm)
         self.node_centers: list[np.ndarray] = []
         self._build(skeleton)
         self._prune_spurs()
@@ -425,8 +440,44 @@ class _SkeletonGraph:
                 return
             self.edges = [e for i, e in enumerate(self.edges) if i not in remove]
 
+    def extend_free_ends(self, mask: np.ndarray) -> None:
+        """Prolonge chaque bout libre jusqu'au bord de l'encre (voir
+        ``END_REACH_MM``). Un bout qui rejoint un autre trait n'est pas libre."""
+        incident = self._incident()
+        h, w = mask.shape
+        steps = np.arange(0.25, END_REACH_MM * self.px_per_mm + 0.25, 0.25)
+        for index, edge in enumerate(self.edges):
+            points, start, end = edge
+            if start is None or geo.path_length(points) < MIN_COMPONENT_MM:
+                continue
+            added = [0.0, 0.0]
+            for side, node in ((0, start), (1, end)):
+                if len(incident[node]) != 1:
+                    continue
+                path = points if side == 1 else points[::-1]
+                tip = path[-1]
+                back = np.linalg.norm(path - tip, axis=1)
+                far = np.flatnonzero(back >= END_DIRECTION_MM)
+                origin = path[far[-1]] if len(far) else path[0]
+                direction = geo.unit(tip - origin)
+                if not direction.any():
+                    continue
+                px = np.round(tip * self.px_per_mm + np.outer(steps, direction)).astype(int)
+                inside = (px[:, 0] >= 0) & (px[:, 0] < w) & (px[:, 1] >= 0) & (px[:, 1] < h)
+                on_ink = np.zeros(len(steps), bool)
+                on_ink[inside] = mask[px[inside, 1], px[inside, 0]] > 0
+                reach = len(steps) if on_ink.all() else int(np.argmin(on_ink))
+                if reach == 0:
+                    continue
+                added[side] = float(steps[reach - 1]) / self.px_per_mm
+                path = np.vstack([path, tip + direction * added[side]])
+                points = path if side == 1 else path[::-1]
+            edge[0] = points
+            self.extensions[index] = sum(added)
+
     # -- traits continus ----------------------------------------------------
-    def strokes(self) -> list[tuple[np.ndarray, bool]]:
+    def strokes(self) -> list[tuple[np.ndarray, bool, float]]:
+        """Traits continus : (points, fermé, longueur ajoutée aux bouts libres)."""
         incident = self._incident()
         partner: dict[tuple[int, int], tuple[int, int]] = {}
         for node, ends in incident.items():
@@ -440,35 +491,32 @@ class _SkeletonGraph:
             points = self.edges[index][0]
             return points if from_end == 0 else points[::-1]
 
-        def walk(index: int, from_end: int) -> tuple[list[np.ndarray], bool]:
-            chain, start = [], (index, from_end)
+        def walk(index: int, from_end: int) -> tuple[np.ndarray, bool, float]:
+            chain, start, extended = [], (index, from_end), 0.0
             while True:
                 visited.add(index)
                 chain.append(oriented(index, from_end))
+                extended += self.extensions.get(index, 0.0)
                 nxt = partner.get((index, 1 - from_end))
-                if nxt is None:
-                    return chain, False
+                if nxt is None or nxt[0] in visited and nxt != start:
+                    return _join(chain), False, extended
                 if nxt == start:
-                    return chain, True
-                if nxt[0] in visited:
-                    return chain, False
+                    return _join(chain), True, extended
                 index, from_end = nxt
 
         for index, (points, start, _) in enumerate(self.edges):
             if start is None:
                 visited.add(index)
-                result.append((points, True))
+                result.append((points, True, 0.0))
         # D'abord les traits ouverts, en partant d'une extrémité libre.
         for index in range(len(self.edges)):
             for end in (0, 1):
                 if index not in visited and (index, end) not in partner:
-                    chain, closed = walk(index, end)
-                    result.append((_join(chain), closed))
+                    result.append(walk(index, end))
         # Restent les boucles dont toutes les arêtes sont recollées.
         for index in range(len(self.edges)):
             if index not in visited:
-                chain, closed = walk(index, 0)
-                result.append((_join(chain), closed))
+                result.append(walk(index, 0))
         return result
 
     def _pair(self, node: int, ends: list[tuple[int, int]]) -> list[tuple]:

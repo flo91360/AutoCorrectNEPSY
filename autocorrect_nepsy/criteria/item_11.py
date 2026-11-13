@@ -105,15 +105,16 @@ def score(drawing: Drawing, item: int = 11) -> ItemResult:
                       mk.segment(s_corner, s_top, fmt(square_sides[3]))]
 
     junctions = [(name, point, max(value, dangling_tail(drawing, figure, point)))
-                 for name, point, value in _junctions(rectangle, square, corners, s_left,
-                                                      s_corner, s_top)]
+                 for name, point, value in _junctions(drawing, rectangle, square, corners,
+                                                      s_left, s_corner, s_top)]
     worst_name, worst_point, worst_value = max(junctions, key=lambda j: j[2])
     scoring.measures["jonction_max_mm"] = worst_value
     if worst_value > 0.5:
         scoring.marks.append(mk.point(worst_point, f"{worst_name} {fmt(worst_value)}"))
     join_text = (f"plus grand intervalle ou dépassement aux intersections {fmt(worst_value)} "
                  f"({worst_name}) ≤ {JOIN_MM.text}")
-    shared = (end_at(inner_h, s_left).gap <= JOIN_MM and end_at(inner_v, s_top).gap <= JOIN_MM)
+    shared = (end_at(inner_h, s_left, drawing).gap <= JOIN_MM
+              and end_at(inner_v, s_top, drawing).gap <= JOIN_MM)
 
     general = scoring["G"]
     general.add(max(widths.values()) > max(heights.values()),
@@ -236,13 +237,13 @@ def _side_text(value: float, positive: str, negative: str) -> str:
     return f"{fmt(abs(value))} {positive if value > 0 else negative}"
 
 
-def _junctions(rectangle, square, corners, s_left, s_corner, s_top):
+def _junctions(drawing, rectangle, square, corners, s_left, s_corner, s_top):
     top, bottom, left, right = rectangle
     inner_h, inner_v = square
     tl, tr, br, bl = corners
 
     def worst(*pairs) -> float:
-        values = [end_at(line, point) for line, point in pairs]
+        values = [end_at(line, point, drawing) for line, point in pairs]
         return max(max(v.gap, v.overshoot) for v in values)
 
     return [("coin haut-gauche", tl, worst((top, tl), (left, tl))),

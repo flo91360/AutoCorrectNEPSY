@@ -189,13 +189,15 @@ def fraction_in_cone(points: np.ndarray, apex: np.ndarray, axis: np.ndarray,
 def max_cone_angle(points: np.ndarray, apex: np.ndarray, axis: np.ndarray,
                    min_distance: float = 0.0) -> float:
     """Plus grand écart (degrés) à l'axe des points vus depuis ``apex``, en
-    ignorant ceux à moins de ``min_distance`` mm (direction peu fiable)."""
+    ignorant ceux à moins de ``min_distance`` mm le long de l'axe (direction
+    peu fiable : un point à côté du sommet, à sa hauteur, n'en a pas)."""
     vectors = points - apex
     norms = np.linalg.norm(vectors, axis=1)
-    mask = norms > max(min_distance, 1e-6)
+    along = np.abs(vectors @ unit(axis))
+    mask = (norms > 1e-6) & (along >= min_distance)
     if not mask.any():
         return 0.0
-    cos = np.abs(vectors[mask] @ unit(axis)) / norms[mask]
+    cos = along[mask] / norms[mask]
     return float(np.degrees(np.arccos(np.clip(cos.min(), -1.0, 1.0))))
 
 
