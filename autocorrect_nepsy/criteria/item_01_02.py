@@ -39,7 +39,10 @@ def score(drawing: Drawing, item: int) -> ItemResult:
     else:
         axis, name, deviation = np.array([1.0, 0.0]), "l'horizontale", line.angle_to_horizontal()
     in_cone_30 = max(geo.fraction_in_cone(line.points, end, axis, GENERAL_CONE) for end in line.ends)
-    widest = min(geo.max_cone_angle(line.points, end, axis, APEX_IGNORE_MM) for end in line.ends)
+    # Rayon compté depuis le centre de la pointe du stylo : le trait est suivi
+    # jusqu'au bord de l'encre, une demi-épaisseur plus loin.
+    ignore = APEX_IGNORE_MM + drawing.stroke_width / 2
+    widest = min(geo.max_cone_angle(line.points, end, axis, ignore) for end in line.ends)
     length = line.length
 
     scoring["G"].limit(length, f"longueur {fmt(length)} ≥ {GENERAL_MIN_MM.text}",

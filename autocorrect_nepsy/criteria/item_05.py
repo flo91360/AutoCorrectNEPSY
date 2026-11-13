@@ -8,8 +8,7 @@ from __future__ import annotations
 from ..strokes import Drawing
 from .base import ItemResult, Scoring, fmt, fmt_ratio, manual_thresholds
 from . import marks as mk
-from .shapes import (check_lines, end_at, extra_elements, intersection, outside,
-                     review_notes)
+from .shapes import check_lines, end_at, extra_elements, intersection, review_notes
 
 # Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
 threshold = manual_thresholds(__name__)
@@ -50,8 +49,8 @@ def score(drawing: Drawing, item: int = 5) -> ItemResult:
         return scoring.result()
 
     vertical, horizontal = verticals[0], horizontals[0]
-    h_end = end_at(horizontal, junction)
-    gap = max(h_end.gap, outside(vertical, junction))
+    h_end = end_at(horizontal, junction, drawing)
+    gap = max(h_end.gap, end_at(vertical, junction, drawing).gap)
     overshoot = h_end.overshoot
     position = (vertical.position(junction) - vertical.t0) / max(vertical.length, 1e-6)
     if vertical.ends[0][1] > vertical.ends[1][1]:

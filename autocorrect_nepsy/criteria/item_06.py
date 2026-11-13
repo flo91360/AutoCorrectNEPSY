@@ -50,7 +50,7 @@ def score(drawing: Drawing, item: int = 6) -> ItemResult:
         return scoring.result()
 
     left, right = sorted(lines[:2], key=lambda l: l.center[0])
-    ends = [end_at(line, apex) for line in (left, right)]
+    ends = [end_at(line, apex, drawing) for line in (left, right)]
     gap = max(e.gap for e in ends)
     overshoot = max(e.overshoot for e in ends)
     far = [max(line.ends, key=lambda p: np.linalg.norm(p - apex)) for line in (left, right)]

@@ -70,7 +70,7 @@ def score(drawing: Drawing, item: int = 4) -> ItemResult:
         "bas-droit": geo.angle_between(tr - br, bl - br),
         "bas-gauche": geo.angle_between(br - bl, tl - bl),
     }
-    overshoots = [end_at(line, points[name]).overshoot
+    overshoots = [end_at(line, points[name], drawing).overshoot
                   for name, pair in corners.items() for line in pair]
     big_overshoots = sum(o > OVERSHOOT_MM for o in overshoots)
     near_overshoots = any(near_threshold(o, OVERSHOOT_MM) for o in overshoots)

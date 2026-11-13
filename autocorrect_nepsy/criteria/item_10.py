@@ -140,7 +140,7 @@ def score(drawing: Drawing, item: int = 10) -> ItemResult:
                  extra: float = 0.0) -> tuple[str, np.ndarray, float]:
         values = [extra, dangling_tail(drawing, owned, point)]
         for line in meeting:
-            at = end_at(line, point)
+            at = end_at(line, point, drawing)
             values += [at.gap, at.overshoot]
         return name, point, max(values)
 

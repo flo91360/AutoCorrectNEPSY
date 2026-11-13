@@ -6,6 +6,15 @@ README).
 
 <!-- nouvelles versions -->
 
+## [0.15.0] - 2026-11-13
+
+- Audit des mesures : les longueurs sont maintenant celles qu'une règle lit sur l'encre. Un trait est mesuré d'un bout à l'autre de son encre (il perdait 0,5 à 1,5 mm, une épaisseur de trait) : items 1, 2, 5, 6, 7, 12 et 13.
+- Intervalle à une jonction (items 5, 6, 10 et 11) : c'est le vide entre les deux encres, et non plus la distance au milieu de l'autre trait. Une jonction parfaite donnait 0,4 à 0,7 mm d'intervalle, et un vide de 0,9 mm au stylo épais dépassait le seuil de 2 mm. Le dépassement est compté depuis le bord du trait croisé.
+- Épaisseur du trait indépendante de son orientation (elle grossissait jusqu'à 40 % pour un trait oblique, ce qui faussait la barre grisée : item 13 échoué en Motricité A au stylo de 1 mm).
+- Petits dépassements : un bout de trait de 1 à 1,5 mm à une intersection n'est plus effacé comme une barbe du squelette (seuil de 1 mm aux items 18 à 21), et garde sa pointe quand il sort à peine du croisement.
+- Item 20 : longueur d'un pétale mesurée du centre à la pointe de l'encre (elle était 1 à 1,7 mm trop courte pour une plage de 27 à 33 mm).
+- Nouveaux tests de justesse (tests/test_mesures.py) qui comparent chaque mesure à l'encre réelle pour des stylos de 0,3 à 1 mm. L'accord avec l'ergothérapeute mesuré avant cette version est à refaire sur le corpus (« Valider un corpus… »).
+
 ## [0.14.10] - 2026-11-10
 
 - Fenêtre principale adaptée aux portables : les étapes 1 et 2 ne disparaissent plus (séparateur des panneaux placé une fois la fenêtre à sa taille et rouvert s'il est écrasé), taille ajustée à l'écran et à la mise à l'échelle de Windows (125/150 %), bouton de lancement et barre d'état toujours visibles.

@@ -21,6 +21,11 @@ cotation que l'ergothérapeute valide.
   rapport. Ces marges couvrent le bruit de mesure de l'outil (0,25 mm, 0,7°,
   0,013 de rapport dans 95 % des cas sur des copies synthétiques numérisées de
   plusieurs façons) et la lecture à la règle et au rapporteur.
+- Les longueurs sont celles qu'une règle lit sur l'encre : un trait est
+  mesuré d'un bout à l'autre de son encre, un intervalle est le vide entre
+  deux encres, un dépassement est compté depuis le bord du trait croisé. Sur
+  des traits synthétiques de 0,3 à 1 mm d'épaisseur, l'écart avec l'encre
+  reste sous 0,3 mm (`tests/test_mesures.py`).
 - Premier essai sur un protocole réel : 124 critères sur 141 identiques à la
   cotation de l'ergothérapeute (kappa de Cohen 0,75).
 
@@ -221,7 +226,10 @@ mesure) ; elles ne figurent pas dans la liste.
    du crayon de l'ergothérapeute par la couleur.
 4. **Traits** (`strokes.py`) : squelette du tracé, graphe des croisements,
    recollement des traits qui se croisent, puis découpage en lignes droites
-   (avec leurs interruptions et les passages repassés).
+   (avec leurs interruptions et les passages repassés). Le squelette s'arrête
+   au centre de la pointe du stylo : chaque bout libre est prolongé jusqu'au
+   bord de l'encre. L'épaisseur du trait est la surface d'encre divisée par
+   la longueur tracée.
 5. **Critères** (`criteria/`) : un module par item, qui applique les seuils du
    manuel (reformulés) aux mesures. Des modules communs retrouvent les lignes
    courbes (`curves.py`), les régions fermées et les polygones (`polygons.py`)
@@ -256,6 +264,15 @@ partir du manuel et ne le remplacent pas.
 - Certains cas restent ambigus entre la règle et le jugement de
   l'ergothérapeute : trait repassé à côté du premier tracé, ligne légèrement
   courbée jugée « non droite ». Ils doivent être revus à la main.
+- Le chiffre de 124 critères sur 141 date d'avant la version 0.15.0, qui
+  mesure jusqu'au bord de l'encre : il est à refaire avec **Valider un
+  corpus…** avant de s'y fier.
+- Un dépassement de moins de 1 mm environ à une intersection se confond avec
+  l'épaisseur du trait et n'est pas lu. Les diamètres des cercles et les
+  côtés des figures fermées sont mesurés au milieu du trait.
+- La largeur d'un pétale (item 20) est prise perpendiculairement à l'axe du
+  pétale, courbure comprise : un pétale très courbé paraît plus large qu'à
+  la règle posée en travers.
 - « Relativement vertical / horizontal » (item 5, Global C) est interprété
   comme moins de 45° d'écart à l'axe.
 - Un stylo noir se confond avec le crayon de l'ergothérapeute : il faut alors

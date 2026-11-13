@@ -30,7 +30,7 @@ from . import marks as mk
 from . import polygons
 from .base import ItemResult, Scoring, fmt, fmt_limit, manual_thresholds, unrecognized_note
 from .curves import extrema
-from .shapes import separate_extras
+from .shapes import ink_reach, separate_extras
 
 # Seuils du manuel, reformulés (liste : autocorrect-nepsy seuils).
 threshold = manual_thresholds(__name__)
@@ -76,6 +76,7 @@ CROSS_BORDERLINE_DEG = 4.0
 # rejoignent, et la pointe, qui se recourbe en crochet sur le modèle aussi.
 INNER_ZONE_MM = 4.0
 TIP_ZONE_MM = 7.0
+END_INK_MM = 2.0  # encre comptée au-delà des bouts de la région d'un pétale, au plus
 
 
 @dataclass
@@ -133,7 +134,7 @@ def score(drawing: Drawing, item: int = 20) -> ItemResult:
     lengths, widths, angles, tip_angles = [], [], [], []
     for k, petal in enumerate(petals):
         start, tip = petal.axis(center)
-        lengths.append(float(np.linalg.norm(tip - start)))
+        lengths.append(_length(drawing, start, tip, center))
         widths.append(_width(petal, start, tip))
         rel = petal.point - center
         angles.append(float(np.degrees(np.arctan2(-rel[1], rel[0]))))
@@ -333,6 +334,23 @@ def _run(outline: np.ndarray, mine: np.ndarray, tip: np.ndarray) -> np.ndarray:
                 best = (gap, list(run))
             run = []
     return outline[best[1]]
+
+
+def _length(drawing: Drawing, start: np.ndarray, tip: np.ndarray, center: np.ndarray) -> float:
+    """Longueur du pétale, d'un bout à l'autre de son encre le long de son axe.
+
+    Aux deux bouts, les bords se rejoignent en un seul trait épais : la région
+    du pétale et le milieu du trait s'arrêtent avant le bout de l'encre (plus
+    d'un millimètre en tout pour un pétale pointu). La mesure est prolongée
+    jusqu'au bord de l'encre : à la pointe, et vers le centre de la fleur sans
+    le dépasser (au-delà, c'est l'encre des autres pétales)."""
+    span = float(np.linalg.norm(tip - start))
+    if span <= 0:
+        return 0.0
+    axis = (tip - start) / span
+    to_center = min(max(float((start - center) @ axis), 0.0), END_INK_MM)
+    return (span + ink_reach(drawing, tip, axis, END_INK_MM)
+            + ink_reach(drawing, start, -axis, to_center))
 
 
 def _width(petal: Petal, start: np.ndarray, tip: np.ndarray) -> float:

@@ -23,6 +23,7 @@ STRAIGHT_MARGIN_MM = 1.0
 SHARP_CORNER_DEG = 60.0
 # Trait doublé (repassé à côté) sur au moins cette longueur : à vérifier.
 DOUBLED_NOTE_MM = 3.0
+BLANK_STEP_MM = 0.05  # pas de recherche du vide entre deux encres
 
 
 @dataclass
@@ -33,14 +34,52 @@ class EndAtPoint:
     overshoot: float  # la ligne dépasse le point (mm)
 
 
-def end_at(line: StraightLine, point: np.ndarray) -> EndAtPoint:
-    """Intervalle ou dépassement d'une ligne censée s'arrêter en ``point``."""
+def end_at(line: StraightLine, point: np.ndarray, drawing: Drawing | None = None) -> EndAtPoint:
+    """Intervalle ou dépassement d'une ligne censée s'arrêter en ``point``.
+
+    Avec ``drawing``, l'intervalle est le vide réel entre les encres : la partie
+    sans encre du chemin qui va du bout de la ligne à ``point``. Le point de
+    jonction est au milieu du trait de l'autre ligne ; mesuré jusqu'à lui, un
+    bout qui s'arrête au bord de ce trait, sans vide, passait pour un
+    intervalle d'une demi-épaisseur de trait. De même, le dépassement est
+    l'encre qui ressort de l'autre trait, comptée depuis son bord."""
     t = line.position(point)
-    if t < line.t0:
-        return EndAtPoint(line.t0 - t, 0.0)
-    if t > line.t1:
-        return EndAtPoint(t - line.t1, 0.0)
-    return EndAtPoint(0.0, min(t - line.t0, line.t1 - t))
+    if line.t0 <= t <= line.t1:
+        overshoot = min(t - line.t0, line.t1 - t)
+        if drawing is not None:
+            overshoot = max(overshoot - drawing.stroke_width / 2, 0.0)
+        return EndAtPoint(0.0, overshoot)
+    gap = line.t0 - t if t < line.t0 else t - line.t1
+    if drawing is not None:
+        along = (line.points - line.center) @ line.direction
+        tip = line.points[int(np.argmin(along) if t < line.t0 else np.argmax(along))]
+        gap = min(gap, blank_length(drawing, tip, point))
+    return EndAtPoint(gap, 0.0)
+
+
+def ink_reach(drawing: Drawing, origin: np.ndarray, direction: np.ndarray, limit: float) -> float:
+    """Distance (mm, au plus ``limit``) sur laquelle l'encre continue depuis
+    ``origin`` dans la ``direction`` donnée."""
+    if limit <= 0:
+        return 0.0
+    steps = np.arange(BLANK_STEP_MM, limit + BLANK_STEP_MM, BLANK_STEP_MM)
+    on_ink = drawing.on_ink(origin + np.outer(steps, geo.unit(direction)))
+    reach = len(steps) if on_ink.all() else int(np.argmin(on_ink))
+    return float(min(steps[reach - 1], limit)) if reach else 0.0
+
+
+def blank_length(drawing: Drawing, a: np.ndarray, b: np.ndarray) -> float:
+    """Longueur (mm) du plus long passage sans encre du segment de ``a`` à ``b``."""
+    span = float(np.linalg.norm(b - a))
+    if span <= 0:
+        return 0.0
+    count = max(2, int(np.ceil(span / BLANK_STEP_MM)) + 1)
+    blank = ~drawing.on_ink(a + np.outer(np.linspace(0.0, 1.0, count), b - a))
+    run = longest = 0
+    for empty in blank:
+        run = run + 1 if empty else 0
+        longest = max(longest, run)
+    return longest * span / (count - 1)
 
 
 def check_lines(checks: Checks, lines: list[StraightLine], band_mm: float,
