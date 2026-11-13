@@ -57,6 +57,17 @@ def end_at(line: StraightLine, point: np.ndarray, drawing: Drawing | None = None
     return EndAtPoint(gap, 0.0)
 
 
+def ink_reach(drawing: Drawing, origin: np.ndarray, direction: np.ndarray, limit: float) -> float:
+    """Distance (mm, au plus ``limit``) sur laquelle l'encre continue depuis
+    ``origin`` dans la ``direction`` donnée."""
+    if limit <= 0:
+        return 0.0
+    steps = np.arange(BLANK_STEP_MM, limit + BLANK_STEP_MM, BLANK_STEP_MM)
+    on_ink = drawing.on_ink(origin + np.outer(steps, geo.unit(direction)))
+    reach = len(steps) if on_ink.all() else int(np.argmin(on_ink))
+    return float(min(steps[reach - 1], limit)) if reach else 0.0
+
+
 def blank_length(drawing: Drawing, a: np.ndarray, b: np.ndarray) -> float:
     """Longueur (mm) du plus long passage sans encre du segment de ``a`` à ``b``."""
     span = float(np.linalg.norm(b - a))

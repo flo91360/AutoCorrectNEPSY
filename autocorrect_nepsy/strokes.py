@@ -29,6 +29,13 @@ STEP_MM = 0.3  # pas de rééchantillonnage des traits
 # distance et d'après sa direction sur ses derniers millimètres.
 END_REACH_MM = 2.0
 END_DIRECTION_MM = 1.5
+# Barbe du squelette due à l'épaisseur de l'encre : plus courte que cette part
+# de l'épaisseur du trait, entre ces deux bornes (mm). Une barbe plus longue
+# est un vrai bout de trait (petit dépassement à une intersection) : effacée
+# jusqu'à 1,5 mm quelle que soit l'épaisseur, elle cachait les dépassements de
+# 1 à 1,5 mm, alors que le seuil du manuel est de 1 mm pour plusieurs items.
+SPUR_WIDTHS = 1.0
+SPUR_RANGE_MM = (0.6, 1.5)
 NODE_RADIUS_MM = 1.2  # rayon de regroupement des pixels de croisement
 MIN_COMPONENT_MM = 1.0  # taches plus petites ignorées (poussières, bavures)
 MIN_BLOB_MM = 0.5  # plus petite tache gardée comme marque (point de stylo)
@@ -253,7 +260,9 @@ def extract_drawing(ink: np.ndarray, px_per_mm: float) -> Drawing:
     skeleton = skeletonize(mask.astype(bool))
     if not skeleton.any():
         return Drawing([], 0.0, [], blobs, mask, px_per_mm)
-    graph = _SkeletonGraph(skeleton, px_per_mm)
+    rough_width = float(mask.sum() / max(1, skeleton.sum())) / px_per_mm
+    graph = _SkeletonGraph(skeleton, px_per_mm,
+                           spur_mm=float(np.clip(SPUR_WIDTHS * rough_width, *SPUR_RANGE_MM)))
     graph.extend_free_ends(mask)
     strokes, drawn = [], 0.0
     for points, closed, extended in graph.strokes():
@@ -350,8 +359,10 @@ def _remove_dust(mask: np.ndarray, px_per_mm: float) -> np.ndarray:
 class _SkeletonGraph:
     """Graphe du squelette : nœuds = extrémités et croisements, arêtes = chemins."""
 
-    def __init__(self, skeleton: np.ndarray, px_per_mm: float):
+    def __init__(self, skeleton: np.ndarray, px_per_mm: float,
+                 spur_mm: float = SPUR_RANGE_MM[1]):
         self.px_per_mm = px_per_mm
+        self.spur_mm = spur_mm
         self.edges: list[list] = []  # [points (mm), nœud début, nœud fin]
         self.extensions: dict[int, float] = {}  # arête -> prolongement de ses bouts libres (mm)
         self.node_centers: list[np.ndarray] = []
@@ -399,6 +410,13 @@ class _SkeletonGraph:
             if closed and ends == [-1, -1]:
                 self.edges.append([points, None, None])
                 continue
+            if ends[0] >= 0 and ends[0] == ends[1] and len(points) <= 2:
+                # Bout de trait qui dépasse à peine la zone du croisement : il
+                # ne la touche que d'un côté, son autre bout est libre (lu
+                # comme une boucle sur le croisement, il perdait sa pointe).
+                if np.argmax(np.linalg.norm(points - self.node_centers[ends[0]], axis=1)) == 0:
+                    points = points[::-1]
+                ends = [ends[0], -1]
             start, end = (self._attach(points, ends[0], at_start=True),
                           self._attach(points, ends[1], at_start=False))
             if ends[0] >= 0:
@@ -425,7 +443,7 @@ class _SkeletonGraph:
 
     def _prune_spurs(self) -> None:
         """Retire les petites barbes du squelette dues à l'épaisseur de l'encre."""
-        spur = 1.5
+        spur = self.spur_mm
         for _ in range(3):
             incident = self._incident()
             remove = set()
